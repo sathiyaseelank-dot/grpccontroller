@@ -19,7 +19,8 @@ const (
 )
 
 // UnarySPIFFEInterceptor enforces SPIFFE identity on unary RPCs.
-func UnarySPIFFEInterceptor(trustDomain string) grpc.UnaryServerInterceptor {
+func UnarySPIFFEInterceptor(trustDomain string, allowedRoles ...string) grpc.UnaryServerInterceptor {
+	roles := makeRoleSet(allowedRoles)
 	return func(
 		ctx context.Context,
 		req interface{},
@@ -27,7 +28,7 @@ func UnarySPIFFEInterceptor(trustDomain string) grpc.UnaryServerInterceptor {
 		handler grpc.UnaryHandler,
 	) (interface{}, error) {
 
-		spiffeID, role, err := extractAndVerifySPIFFE(ctx, trustDomain)
+		spiffeID, role, err := extractAndVerifySPIFFE(ctx, trustDomain, roles)
 		if err != nil {
 			return nil, err
 		}
@@ -40,7 +41,8 @@ func UnarySPIFFEInterceptor(trustDomain string) grpc.UnaryServerInterceptor {
 }
 
 // StreamSPIFFEInterceptor enforces SPIFFE identity on streaming RPCs.
-func StreamSPIFFEInterceptor(trustDomain string) grpc.StreamServerInterceptor {
+func StreamSPIFFEInterceptor(trustDomain string, allowedRoles ...string) grpc.StreamServerInterceptor {
+	roles := makeRoleSet(allowedRoles)
 	return func(
 		srv interface{},
 		ss grpc.ServerStream,
@@ -48,7 +50,7 @@ func StreamSPIFFEInterceptor(trustDomain string) grpc.StreamServerInterceptor {
 		handler grpc.StreamHandler,
 	) error {
 
-		spiffeID, role, err := extractAndVerifySPIFFE(ss.Context(), trustDomain)
+		spiffeID, role, err := extractAndVerifySPIFFE(ss.Context(), trustDomain, roles)
 		if err != nil {
 			return err
 		}
@@ -76,9 +78,33 @@ func (w *wrappedStream) Context() context.Context {
 	return w.ctx
 }
 
+// SPIFFEIDFromContext returns the SPIFFE ID from context.
+func SPIFFEIDFromContext(ctx context.Context) (string, bool) {
+	v := ctx.Value(spiffeIDContextKey)
+	if v == nil {
+		return "", false
+	}
+	id, ok := v.(string)
+	return id, ok
+}
+
+// RoleFromContext returns the SPIFFE role from context.
+func RoleFromContext(ctx context.Context) (string, bool) {
+	v := ctx.Value(roleContextKey)
+	if v == nil {
+		return "", false
+	}
+	role, ok := v.(string)
+	return role, ok
+}
+
 // extractAndVerifySPIFFE pulls the peer certificate from context and validates
 // the SPIFFE ID and role.
-func extractAndVerifySPIFFE(ctx context.Context, trustDomain string) (string, string, error) {
+func extractAndVerifySPIFFE(
+	ctx context.Context,
+	trustDomain string,
+	allowedRoles map[string]struct{},
+) (string, string, error) {
 	p, ok := peer.FromContext(ctx)
 	if !ok {
 		return "", "", errors.New("missing peer information")
@@ -116,9 +142,25 @@ func extractAndVerifySPIFFE(ctx context.Context, trustDomain string) (string, st
 	}
 
 	role := parts[0]
-	if role != "connector" && role != "tunneler" {
-		return "", "", errors.New("invalid SPIFFE role")
+	if len(allowedRoles) > 0 {
+		if _, ok := allowedRoles[role]; !ok {
+			return "", "", errors.New("invalid SPIFFE role")
+		}
 	}
 
 	return uri.String(), role, nil
+}
+
+func makeRoleSet(roles []string) map[string]struct{} {
+	if len(roles) == 0 {
+		return nil
+	}
+	set := make(map[string]struct{}, len(roles))
+	for _, r := range roles {
+		if r == "" {
+			continue
+		}
+		set[r] = struct{}{}
+	}
+	return set
 }

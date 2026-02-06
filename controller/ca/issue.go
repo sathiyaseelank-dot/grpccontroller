@@ -62,6 +62,10 @@ func IssueWorkloadCert(
 			x509.ExtKeyUsageServerAuth,
 		},
 
+		BasicConstraintsValid: true,
+		IsCA:                  false,
+
+		// Enforce exactly one URI SAN and no CN.
 		URIs: []*url.URL{uri},
 	}
 

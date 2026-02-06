@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
+	"strings"
 	"time"
 
 	controllerpb "controller/gen/controllerpb"
@@ -39,13 +40,17 @@ func (s *EnrollmentServer) EnrollConnector(
 	req *controllerpb.EnrollRequest,
 ) (*controllerpb.EnrollResponse, error) {
 
-	if req.GetId() == "" {
+	if !validID(req.GetId()) {
 		return nil, status.Error(codes.InvalidArgument, "missing connector id")
 	}
 
 	pubKey, err := parsePublicKey(req.GetPublicKey())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid public key: %v", err)
+	}
+
+	if err := s.authorize(ctx, "connector", req.GetId()); err != nil {
+		return nil, err
 	}
 
 	spiffeID := fmt.Sprintf(
@@ -76,13 +81,17 @@ func (s *EnrollmentServer) EnrollTunneler(
 	req *controllerpb.EnrollRequest,
 ) (*controllerpb.EnrollResponse, error) {
 
-	if req.GetId() == "" {
+	if !validID(req.GetId()) {
 		return nil, status.Error(codes.InvalidArgument, "missing tunneler id")
 	}
 
 	pubKey, err := parsePublicKey(req.GetPublicKey())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid public key: %v", err)
+	}
+
+	if err := s.authorize(ctx, "tunneler", req.GetId()); err != nil {
+		return nil, err
 	}
 
 	spiffeID := fmt.Sprintf(
@@ -107,15 +116,13 @@ func (s *EnrollmentServer) EnrollTunneler(
 	}, nil
 }
 
-// Renew re-issues a certificate for an existing workload.
-// This example assumes the same semantics as EnrollTunneler.
-// In a real system, you would authenticate the caller first.
+// Renew re-issues a certificate for an existing workload based on its SPIFFE identity.
 func (s *EnrollmentServer) Renew(
 	ctx context.Context,
 	req *controllerpb.EnrollRequest,
 ) (*controllerpb.EnrollResponse, error) {
 
-	if req.GetId() == "" {
+	if !validID(req.GetId()) {
 		return nil, status.Error(codes.InvalidArgument, "missing id")
 	}
 
@@ -124,20 +131,22 @@ func (s *EnrollmentServer) Renew(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid public key: %v", err)
 	}
 
-	// NOTE: For simplicity, renewal is treated as a tunneler renewal here.
-	// You can split this later based on authenticated role.
-	spiffeID := fmt.Sprintf(
-		"spiffe://%s/tunneler/%s",
-		s.TrustDomain,
-		req.GetId(),
-	)
+	role, id, err := s.identityFromContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if id != req.GetId() {
+		return nil, status.Error(codes.PermissionDenied, "id mismatch for renewal")
+	}
 
-	certPEM, err := ca.IssueWorkloadCert(
-		s.CA,
-		spiffeID,
-		pubKey,
-		30*time.Minute,
-	)
+	spiffeID := fmt.Sprintf("spiffe://%s/%s/%s", s.TrustDomain, role, req.GetId())
+
+	ttl := 30 * time.Minute
+	if role == "connector" {
+		ttl = 1 * time.Hour
+	}
+
+	certPEM, err := ca.IssueWorkloadCert(s.CA, spiffeID, pubKey, ttl)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "certificate renewal failed: %v", err)
 	}
@@ -165,4 +174,53 @@ func parsePublicKey(pemBytes []byte) (interface{}, error) {
 	}
 
 	return pub, nil
+}
+
+func (s *EnrollmentServer) authorize(ctx context.Context, expectedRole, expectedID string) error {
+	role, id, err := s.identityFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	if role != expectedRole {
+		return status.Error(codes.PermissionDenied, "role not permitted for enrollment")
+	}
+	if id != expectedID {
+		return status.Error(codes.PermissionDenied, "id mismatch for enrollment")
+	}
+	return nil
+}
+
+func (s *EnrollmentServer) identityFromContext(ctx context.Context) (string, string, error) {
+	spiffeID, ok := SPIFFEIDFromContext(ctx)
+	if !ok {
+		return "", "", status.Error(codes.Unauthenticated, "missing SPIFFE identity")
+	}
+
+	role, ok := RoleFromContext(ctx)
+	if !ok {
+		return "", "", status.Error(codes.Unauthenticated, "missing SPIFFE role")
+	}
+
+	id := strings.TrimPrefix(spiffeID, fmt.Sprintf("spiffe://%s/%s/", s.TrustDomain, role))
+	if id == "" || strings.Contains(id, "/") {
+		return "", "", status.Error(codes.Unauthenticated, "invalid SPIFFE id")
+	}
+
+	return role, id, nil
+}
+
+func validID(id string) bool {
+	if id == "" || len(id) > 128 {
+		return false
+	}
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') ||
+			r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		return false
+	}
+	return true
 }

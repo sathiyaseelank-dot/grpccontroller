@@ -1,11 +1,17 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"log"
 	"net"
 	"os"
+	"time"
 
 	"controller/api"
 	"controller/ca"
@@ -19,15 +25,13 @@ func main() {
 	// ---- required environment variables ----
 	caCertPEM := []byte(os.Getenv("INTERNAL_CA_CERT"))
 	caKeyPEM := []byte(os.Getenv("INTERNAL_CA_KEY"))
-
-	controllerCertPEM := []byte(os.Getenv("CONTROLLER_CERT"))
-	controllerKeyPEM := []byte(os.Getenv("CONTROLLER_KEY"))
+	trustDomain := os.Getenv("TRUST_DOMAIN")
+	if trustDomain == "" {
+		trustDomain = "mycorp.internal"
+	}
 
 	if len(caCertPEM) == 0 || len(caKeyPEM) == 0 {
 		log.Fatal("INTERNAL_CA_CERT or INTERNAL_CA_KEY is not set")
-	}
-	if len(controllerCertPEM) == 0 || len(controllerKeyPEM) == 0 {
-		log.Fatal("CONTROLLER_CERT or CONTROLLER_KEY is not set")
 	}
 
 	// ---- load internal CA ----
@@ -36,13 +40,10 @@ func main() {
 		log.Fatalf("failed to load internal CA: %v", err)
 	}
 
-	// ---- load controller TLS certificate ----
-	controllerTLSCert, err := tls.X509KeyPair(
-		controllerCertPEM,
-		controllerKeyPEM,
-	)
+	// ---- load or issue controller TLS certificate ----
+	controllerTLSCert, err := loadOrIssueControllerCert(caInst, trustDomain)
 	if err != nil {
-		log.Fatalf("failed to load controller TLS cert: %v", err)
+		log.Fatalf("failed to prepare controller TLS cert: %v", err)
 	}
 
 	// ---- build CA pool ----
@@ -64,20 +65,25 @@ func main() {
 	// ---- gRPC server ----
 	grpcServer := grpc.NewServer(
 		grpc.Creds(creds),
-		grpc.UnaryInterceptor(api.UnarySPIFFEInterceptor("mycorp.internal")),
-		grpc.StreamInterceptor(api.StreamSPIFFEInterceptor("mycorp.internal")),
+		grpc.UnaryInterceptor(api.UnarySPIFFEInterceptor(trustDomain, "connector", "tunneler")),
+		grpc.StreamInterceptor(api.StreamSPIFFEInterceptor(trustDomain, "connector", "tunneler")),
 	)
 
 	// ---- enrollment service ----
 	enrollServer := api.NewEnrollmentServer(
 		caInst,
 		caCertPEM,
-		"mycorp.internal", // SPIFFE trust domain (without scheme)
+		trustDomain, // SPIFFE trust domain (without scheme)
 	)
 
 	controllerpb.RegisterEnrollmentServiceServer(
 		grpcServer,
 		enrollServer,
+	)
+
+	controllerpb.RegisterControlPlaneServer(
+		grpcServer,
+		api.NewControlPlaneServer(trustDomain),
 	)
 
 	// ---- listen ----
@@ -91,4 +97,38 @@ func main() {
 	if err := grpcServer.Serve(lis); err != nil {
 		log.Fatalf("gRPC server failed: %v", err)
 	}
+}
+
+func loadOrIssueControllerCert(caInst *ca.CA, trustDomain string) (tls.Certificate, error) {
+	controllerCertPEM := []byte(os.Getenv("CONTROLLER_CERT"))
+	controllerKeyPEM := []byte(os.Getenv("CONTROLLER_KEY"))
+	if len(controllerCertPEM) > 0 && len(controllerKeyPEM) > 0 {
+		return tls.X509KeyPair(controllerCertPEM, controllerKeyPEM)
+	}
+
+	controllerID := os.Getenv("CONTROLLER_ID")
+	if controllerID == "" {
+		controllerID = "default"
+	}
+	spiffeID := "spiffe://" + trustDomain + "/controller/" + controllerID
+
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	certPEM, err := ca.IssueWorkloadCert(caInst, spiffeID, &privKey.PublicKey, 12*time.Hour)
+	if err != nil {
+		return tls.Certificate{}, err
+	}
+
+	block, _ := pem.Decode(certPEM)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return tls.Certificate{}, errors.New("failed to decode controller certificate")
+	}
+
+	return tls.Certificate{
+		Certificate: [][]byte{block.Bytes},
+		PrivateKey:  privKey,
+	}, nil
 }
