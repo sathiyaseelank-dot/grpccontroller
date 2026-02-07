@@ -12,6 +12,7 @@ import (
 	"os"
 	"time"
 
+	"connector/internal/bootstrap"
 	"connector/internal/tlsutil"
 	controllerpb "controller/gen/controllerpb"
 
@@ -24,7 +25,6 @@ type Config struct {
 	ControllerAddr string
 	ConnectorID    string
 	TrustDomain    string
-	RootCAPEM      []byte
 	Token          string
 	PrivateIP      string
 	Version        string
@@ -32,7 +32,7 @@ type Config struct {
 
 // Run performs one-time connector enrollment with the controller.
 func Run() error {
-	cfg, err := ConfigFromEnv()
+	cfg, err := ConfigFromEnvEnroll()
 	if err != nil {
 		return err
 	}
@@ -51,8 +51,8 @@ func Run() error {
 	return nil
 }
 
-// ConfigFromEnv builds Config from environment variables.
-func ConfigFromEnv() (Config, error) {
+// ConfigFromEnvEnroll builds Config for enroll mode.
+func ConfigFromEnvEnroll() (Config, error) {
 	controllerAddr := os.Getenv("CONTROLLER_ADDR")
 	connectorID := os.Getenv("CONNECTOR_ID")
 	trustDomain := os.Getenv("TRUST_DOMAIN")
@@ -60,8 +60,6 @@ func ConfigFromEnv() (Config, error) {
 	if trustDomain == "" {
 		trustDomain = "mycorp.internal"
 	}
-
-	rootCAPEM := []byte(os.Getenv("INTERNAL_CA_CERT"))
 
 	if controllerAddr == "" {
 		return Config{}, fmt.Errorf("CONTROLLER_ADDR is not set")
@@ -71,9 +69,6 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if token == "" {
 		return Config{}, fmt.Errorf("MY_CONNECTOR_TOKEN is not set")
-	}
-	if len(rootCAPEM) == 0 {
-		return Config{}, fmt.Errorf("INTERNAL_CA_CERT is not set")
 	}
 
 	privateIP, err := ResolvePrivateIP(controllerAddr)
@@ -87,8 +82,39 @@ func ConfigFromEnv() (Config, error) {
 		ControllerAddr: controllerAddr,
 		ConnectorID:    connectorID,
 		TrustDomain:    trustDomain,
-		RootCAPEM:      rootCAPEM,
 		Token:          token,
+		PrivateIP:      privateIP,
+		Version:        version,
+	}, nil
+}
+
+// ConfigFromEnvRun builds Config for run mode.
+func ConfigFromEnvRun() (Config, error) {
+	controllerAddr := os.Getenv("CONTROLLER_ADDR")
+	connectorID := os.Getenv("CONNECTOR_ID")
+	trustDomain := os.Getenv("TRUST_DOMAIN")
+	if trustDomain == "" {
+		trustDomain = "mycorp.internal"
+	}
+
+	if controllerAddr == "" {
+		return Config{}, fmt.Errorf("CONTROLLER_ADDR is not set")
+	}
+	if connectorID == "" {
+		return Config{}, fmt.Errorf("CONNECTOR_ID is not set")
+	}
+
+	privateIP, err := ResolvePrivateIP(controllerAddr)
+	if err != nil {
+		return Config{}, err
+	}
+
+	version := ResolveVersion()
+
+	return Config{
+		ControllerAddr: controllerAddr,
+		ConnectorID:    connectorID,
+		TrustDomain:    trustDomain,
 		PrivateIP:      privateIP,
 		Version:        version,
 	}, nil
@@ -112,18 +138,18 @@ func Enroll(ctx context.Context, cfg Config) (tls.Certificate, []byte, []byte, s
 		Bytes: pubDER,
 	})
 
-	rootPool, err := tlsutil.RootPoolFromPEM(cfg.RootCAPEM)
+	bootstrapCAPEM := bootstrap.CAPEM()
+	rootPool, err := tlsutil.RootPoolFromPEM(bootstrapCAPEM)
 	if err != nil {
 		return tls.Certificate{}, nil, nil, "", err
 	}
 
 	// ---- TLS config for enrollment ----
 	tlsConfig := &tls.Config{
-		MinVersion:         tls.VersionTLS13,
-		RootCAs:            rootPool,
-		InsecureSkipVerify: true,
+		MinVersion: tls.VersionTLS13,
+		RootCAs:    rootPool,
 		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-			return tlsutil.VerifyPeerSPIFFE(rawCerts, rootPool, cfg.TrustDomain, "controller", x509.ExtKeyUsageServerAuth)
+			return tlsutil.VerifyPeerSPIFFE(rawCerts, verifiedChains, cfg.TrustDomain, "controller")
 		},
 	}
 
@@ -158,6 +184,10 @@ func Enroll(ctx context.Context, cfg Config) (tls.Certificate, []byte, []byte, s
 		return tls.Certificate{}, nil, nil, "", fmt.Errorf("controller returned empty CA certificate")
 	}
 
+	if _, err := tlsutil.ParseAndValidateCA(resp.CaCertificate); err != nil {
+		return tls.Certificate{}, nil, nil, "", fmt.Errorf("invalid internal CA: %w", err)
+	}
+
 	// ---- basic validation of returned cert ----
 	block, _ := pem.Decode(resp.Certificate)
 	if block == nil || block.Type != "CERTIFICATE" {
@@ -173,24 +203,10 @@ func Enroll(ctx context.Context, cfg Config) (tls.Certificate, []byte, []byte, s
 		return tls.Certificate{}, nil, nil, "", fmt.Errorf("issued certificate must contain exactly one SPIFFE ID")
 	}
 
-	// ---- ensure CA pinning ----
-	if !equalCAPEM(cfg.RootCAPEM, resp.CaCertificate) {
-		return tls.Certificate{}, nil, nil, "", fmt.Errorf("controller CA does not match pinned CA")
-	}
-
 	workloadCert := tls.Certificate{
 		Certificate: [][]byte{block.Bytes},
 		PrivateKey:  privKey,
 	}
 
 	return workloadCert, resp.Certificate, resp.CaCertificate, cert.URIs[0].String(), nil
-}
-
-func equalCAPEM(a, b []byte) bool {
-	ab, _ := pem.Decode(a)
-	bb, _ := pem.Decode(b)
-	if ab == nil || bb == nil {
-		return false
-	}
-	return string(ab.Bytes) == string(bb.Bytes)
 }

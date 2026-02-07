@@ -32,7 +32,7 @@ func Run() error {
 		return err
 	}
 
-	enrollCfg, err := enroll.ConfigFromEnv()
+	enrollCfg, err := enroll.ConfigFromEnvRun()
 	if err != nil {
 		return err
 	}
@@ -60,14 +60,10 @@ func Run() error {
 
 	reloadCh := make(chan struct{}, 1)
 	go controlPlaneLoop(ctx, cfg.controllerAddr, cfg.trustDomain, cfg.connectorID, cfg.privateIP, store, rootPool, reloadCh)
-	go renewalLoop(ctx, cfg.controllerAddr, cfg.connectorID, cfg.trustDomain, store, rootPool, reloadCh)
+	go renewalLoop(ctx, cfg.controllerAddr, cfg.connectorID, cfg.trustDomain, store, rootPool, caPEM, reloadCh)
 
 	if cfg.listenAddr != "" {
-		serverErr := make(chan error, 1)
-		go func() {
-			serverErr <- runConnectorServer(cfg.listenAddr, cfg.trustDomain, store, rootPool)
-		}()
-		return <-serverErr
+		go serverLoop(ctx, cfg.listenAddr, cfg.trustDomain, store, rootPool)
 	}
 
 	<-ctx.Done()
@@ -137,6 +133,32 @@ func runConnectorServer(addr, trustDomain string, store *tlsutil.CertStore, root
 	return grpcServer.Serve(lis)
 }
 
+func serverLoop(ctx context.Context, addr, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool) {
+	backoff := 2 * time.Second
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		if err := runConnectorServer(addr, trustDomain, store, roots); err != nil && !errors.Is(err, context.Canceled) {
+			log.Printf("connector server stopped: %v", err)
+		}
+
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		if backoff < 30*time.Second {
+			backoff *= 2
+		}
+	}
+}
+
 func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain, connectorID, privateIP string, store *tlsutil.CertStore, roots *x509.CertPool, reloadCh <-chan struct{}) {
 	backoff := 2 * time.Second
 	for {
@@ -184,9 +206,9 @@ func connectControlPlane(ctx context.Context, controllerAddr, trustDomain, conne
 	tlsConfig := &tls.Config{
 		MinVersion:           tls.VersionTLS13,
 		GetClientCertificate: store.GetClientCertificate,
-		InsecureSkipVerify:   true,
+		RootCAs:              roots,
 		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-			return tlsutil.VerifyPeerSPIFFE(rawCerts, roots, trustDomain, "controller", x509.ExtKeyUsageServerAuth)
+			return tlsutil.VerifyPeerSPIFFE(rawCerts, verifiedChains, trustDomain, "controller")
 		},
 	}
 
@@ -248,7 +270,7 @@ func connectControlPlane(ctx context.Context, controllerAddr, trustDomain, conne
 	}
 }
 
-func renewalLoop(ctx context.Context, controllerAddr, connectorID, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, reloadCh chan<- struct{}) {
+func renewalLoop(ctx context.Context, controllerAddr, connectorID, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, caPEM []byte, reloadCh chan<- struct{}) {
 	for {
 		next := nextRenewal(store.NotAfter())
 		timer := time.NewTimer(time.Until(next))
@@ -259,7 +281,7 @@ func renewalLoop(ctx context.Context, controllerAddr, connectorID, trustDomain s
 		case <-timer.C:
 		}
 
-		cert, certPEM, notAfter, err := renewOnce(ctx, controllerAddr, connectorID, trustDomain, store, roots)
+		cert, certPEM, notAfter, err := renewOnce(ctx, controllerAddr, connectorID, trustDomain, store, roots, caPEM)
 		if err != nil {
 			log.Printf("certificate renewal failed: %v", err)
 			continue
@@ -273,7 +295,7 @@ func renewalLoop(ctx context.Context, controllerAddr, connectorID, trustDomain s
 	}
 }
 
-func renewOnce(ctx context.Context, controllerAddr, connectorID, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool) (tls.Certificate, []byte, time.Time, error) {
+func renewOnce(ctx context.Context, controllerAddr, connectorID, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, caPEM []byte) (tls.Certificate, []byte, time.Time, error) {
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return tls.Certificate{}, nil, time.Time{}, err
@@ -289,9 +311,9 @@ func renewOnce(ctx context.Context, controllerAddr, connectorID, trustDomain str
 	tlsConfig := &tls.Config{
 		MinVersion:           tls.VersionTLS13,
 		GetClientCertificate: store.GetClientCertificate,
-		InsecureSkipVerify:   true,
+		RootCAs:              roots,
 		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
-			return tlsutil.VerifyPeerSPIFFE(rawCerts, roots, trustDomain, "controller", x509.ExtKeyUsageServerAuth)
+			return tlsutil.VerifyPeerSPIFFE(rawCerts, verifiedChains, trustDomain, "controller")
 		},
 	}
 
@@ -309,6 +331,12 @@ func renewOnce(ctx context.Context, controllerAddr, connectorID, trustDomain str
 	resp, err := client.Renew(ctx, &controllerpb.EnrollRequest{Id: connectorID, PublicKey: pubPEM})
 	if err != nil {
 		return tls.Certificate{}, nil, time.Time{}, err
+	}
+	if len(resp.CaCertificate) == 0 {
+		return tls.Certificate{}, nil, time.Time{}, errors.New("empty CA certificate in renewal response")
+	}
+	if !tlsutil.EqualCAPEM(caPEM, resp.CaCertificate) {
+		return tls.Certificate{}, nil, time.Time{}, errors.New("internal CA mismatch during renewal")
 	}
 
 	block, _ := pem.Decode(resp.Certificate)

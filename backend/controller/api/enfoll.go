@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"crypto/subtle"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -21,19 +20,17 @@ import (
 type EnrollmentServer struct {
 	controllerpb.UnimplementedEnrollmentServiceServer
 
-	CA                   *ca.CA
-	CAPEM                []byte
-	TrustDomain          string
-	ConnectorEnrollToken string
+	CA          *ca.CA
+	CAPEM       []byte
+	TrustDomain string
 }
 
 // NewEnrollmentServer creates a new EnrollmentServer.
-func NewEnrollmentServer(caInst *ca.CA, caPEM []byte, trustDomain, connectorToken string) *EnrollmentServer {
+func NewEnrollmentServer(caInst *ca.CA, caPEM []byte, trustDomain string) *EnrollmentServer {
 	return &EnrollmentServer{
-		CA:                   caInst,
-		CAPEM:                caPEM,
-		TrustDomain:          trustDomain,
-		ConnectorEnrollToken: connectorToken,
+		CA:          caInst,
+		CAPEM:       caPEM,
+		TrustDomain: trustDomain,
 	}
 }
 
@@ -56,10 +53,6 @@ func (s *EnrollmentServer) EnrollConnector(
 	pubKey, err := parsePublicKey(req.GetPublicKey())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid public key: %v", err)
-	}
-
-	if err := s.authorizeConnectorToken(req.GetToken()); err != nil {
-		return nil, err
 	}
 
 	spiffeID := fmt.Sprintf(
@@ -198,19 +191,6 @@ func (s *EnrollmentServer) authorize(ctx context.Context, expectedRole, expected
 	}
 	if id != expectedID {
 		return status.Error(codes.PermissionDenied, "id mismatch for enrollment")
-	}
-	return nil
-}
-
-func (s *EnrollmentServer) authorizeConnectorToken(provided string) error {
-	if s.ConnectorEnrollToken == "" {
-		return status.Error(codes.FailedPrecondition, "connector enrollment token not configured")
-	}
-	if provided == "" {
-		return status.Error(codes.Unauthenticated, "missing enrollment token")
-	}
-	if subtle.ConstantTimeCompare([]byte(provided), []byte(s.ConnectorEnrollToken)) != 1 {
-		return status.Error(codes.PermissionDenied, "invalid enrollment token")
 	}
 	return nil
 }

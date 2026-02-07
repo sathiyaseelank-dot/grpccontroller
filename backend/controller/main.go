@@ -29,16 +29,9 @@ func main() {
 	if trustDomain == "" {
 		trustDomain = "mycorp.internal"
 	}
-	connectorEnrollToken := os.Getenv("CONNECTOR_ENROLL_TOKEN")
-	if connectorEnrollToken == "" {
-		connectorEnrollToken = os.Getenv("MY_CONNECTOR_TOKEN")
-	}
 
 	if len(caCertPEM) == 0 || len(caKeyPEM) == 0 {
 		log.Fatal("INTERNAL_CA_CERT or INTERNAL_CA_KEY is not set")
-	}
-	if connectorEnrollToken == "" {
-		log.Fatal("CONNECTOR_ENROLL_TOKEN is not set")
 	}
 
 	// ---- load internal CA ----
@@ -83,7 +76,6 @@ func main() {
 		caInst,
 		caCertPEM,
 		trustDomain, // SPIFFE trust domain (without scheme)
-		connectorEnrollToken,
 	)
 
 	controllerpb.RegisterEnrollmentServiceServer(

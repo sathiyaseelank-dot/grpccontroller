@@ -36,12 +36,9 @@ func ResolvePrivateIP(controllerAddr string) (string, error) {
 }
 
 func discoverPrivateIP(controllerAddr string) (string, error) {
-	host := controllerAddr
-	if strings.Contains(controllerAddr, "://") {
-		return "", fmt.Errorf("CONTROLLER_ADDR must be host:port")
-	}
-	if h, _, err := net.SplitHostPort(controllerAddr); err == nil && h != "" {
-		host = h
+	host, err := controllerHost(controllerAddr)
+	if err != nil {
+		return "", err
 	}
 	conn, err := net.Dial("udp", net.JoinHostPort(host, "53"))
 	if err != nil {
@@ -54,4 +51,14 @@ func discoverPrivateIP(controllerAddr string) (string, error) {
 		return "", fmt.Errorf("failed to determine private IP")
 	}
 	return localAddr.IP.String(), nil
+}
+
+func controllerHost(controllerAddr string) (string, error) {
+	if strings.Contains(controllerAddr, "://") {
+		return "", fmt.Errorf("CONTROLLER_ADDR must be host:port")
+	}
+	if host, _, err := net.SplitHostPort(controllerAddr); err == nil && host != "" {
+		return host, nil
+	}
+	return "", fmt.Errorf("CONTROLLER_ADDR must be host:port")
 }
