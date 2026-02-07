@@ -25,8 +25,9 @@ type Config struct {
 	ConnectorID    string
 	TrustDomain    string
 	RootCAPEM      []byte
-	BootstrapCert  []byte
-	BootstrapKey   []byte
+	Token          string
+	PrivateIP      string
+	Version        string
 }
 
 // Run performs one-time connector enrollment with the controller.
@@ -55,13 +56,12 @@ func ConfigFromEnv() (Config, error) {
 	controllerAddr := os.Getenv("CONTROLLER_ADDR")
 	connectorID := os.Getenv("CONNECTOR_ID")
 	trustDomain := os.Getenv("TRUST_DOMAIN")
+	token := os.Getenv("MY_CONNECTOR_TOKEN")
 	if trustDomain == "" {
 		trustDomain = "mycorp.internal"
 	}
 
 	rootCAPEM := []byte(os.Getenv("INTERNAL_CA_CERT"))
-	bootstrapCert := []byte(os.Getenv("BOOTSTRAP_CERT"))
-	bootstrapKey := []byte(os.Getenv("BOOTSTRAP_KEY"))
 
 	if controllerAddr == "" {
 		return Config{}, fmt.Errorf("CONTROLLER_ADDR is not set")
@@ -69,20 +69,28 @@ func ConfigFromEnv() (Config, error) {
 	if connectorID == "" {
 		return Config{}, fmt.Errorf("CONNECTOR_ID is not set")
 	}
+	if token == "" {
+		return Config{}, fmt.Errorf("MY_CONNECTOR_TOKEN is not set")
+	}
 	if len(rootCAPEM) == 0 {
 		return Config{}, fmt.Errorf("INTERNAL_CA_CERT is not set")
 	}
-	if len(bootstrapCert) == 0 || len(bootstrapKey) == 0 {
-		return Config{}, fmt.Errorf("BOOTSTRAP_CERT or BOOTSTRAP_KEY is not set")
+
+	privateIP, err := ResolvePrivateIP(controllerAddr)
+	if err != nil {
+		return Config{}, err
 	}
+
+	version := ResolveVersion()
 
 	return Config{
 		ControllerAddr: controllerAddr,
 		ConnectorID:    connectorID,
 		TrustDomain:    trustDomain,
 		RootCAPEM:      rootCAPEM,
-		BootstrapCert:  bootstrapCert,
-		BootstrapKey:   bootstrapKey,
+		Token:          token,
+		PrivateIP:      privateIP,
+		Version:        version,
 	}, nil
 }
 
@@ -104,11 +112,6 @@ func Enroll(ctx context.Context, cfg Config) (tls.Certificate, []byte, []byte, s
 		Bytes: pubDER,
 	})
 
-	bootstrapCert, err := tls.X509KeyPair(cfg.BootstrapCert, cfg.BootstrapKey)
-	if err != nil {
-		return tls.Certificate{}, nil, nil, "", fmt.Errorf("invalid bootstrap certificate: %w", err)
-	}
-
 	rootPool, err := tlsutil.RootPoolFromPEM(cfg.RootCAPEM)
 	if err != nil {
 		return tls.Certificate{}, nil, nil, "", err
@@ -117,7 +120,7 @@ func Enroll(ctx context.Context, cfg Config) (tls.Certificate, []byte, []byte, s
 	// ---- TLS config for enrollment ----
 	tlsConfig := &tls.Config{
 		MinVersion:         tls.VersionTLS13,
-		Certificates:       []tls.Certificate{bootstrapCert},
+		RootCAs:            rootPool,
 		InsecureSkipVerify: true,
 		VerifyPeerCertificate: func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
 			return tlsutil.VerifyPeerSPIFFE(rawCerts, rootPool, cfg.TrustDomain, "controller", x509.ExtKeyUsageServerAuth)
@@ -140,6 +143,9 @@ func Enroll(ctx context.Context, cfg Config) (tls.Certificate, []byte, []byte, s
 	resp, err := client.EnrollConnector(ctx, &controllerpb.EnrollRequest{
 		Id:        cfg.ConnectorID,
 		PublicKey: pubPEM,
+		Token:     cfg.Token,
+		PrivateIp: cfg.PrivateIP,
+		Version:   cfg.Version,
 	})
 	if err != nil {
 		return tls.Certificate{}, nil, nil, "", fmt.Errorf("enrollment RPC failed: %w", err)

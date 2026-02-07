@@ -29,9 +29,16 @@ func main() {
 	if trustDomain == "" {
 		trustDomain = "mycorp.internal"
 	}
+	connectorEnrollToken := os.Getenv("CONNECTOR_ENROLL_TOKEN")
+	if connectorEnrollToken == "" {
+		connectorEnrollToken = os.Getenv("MY_CONNECTOR_TOKEN")
+	}
 
 	if len(caCertPEM) == 0 || len(caKeyPEM) == 0 {
 		log.Fatal("INTERNAL_CA_CERT or INTERNAL_CA_KEY is not set")
+	}
+	if connectorEnrollToken == "" {
+		log.Fatal("CONNECTOR_ENROLL_TOKEN is not set")
 	}
 
 	// ---- load internal CA ----
@@ -56,7 +63,7 @@ func main() {
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{controllerTLSCert},
 		ClientCAs:    caPool,
-		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientAuth:   tls.VerifyClientCertIfGiven,
 		MinVersion:   tls.VersionTLS13,
 	}
 
@@ -65,7 +72,9 @@ func main() {
 	// ---- gRPC server ----
 	grpcServer := grpc.NewServer(
 		grpc.Creds(creds),
-		grpc.UnaryInterceptor(api.UnarySPIFFEInterceptor(trustDomain, "connector", "tunneler")),
+		grpc.UnaryInterceptor(api.UnaryAuthInterceptor(trustDomain, map[string]struct{}{
+			controllerpb.EnrollmentService_EnrollConnector_FullMethodName: {},
+		}, "connector", "tunneler")),
 		grpc.StreamInterceptor(api.StreamSPIFFEInterceptor(trustDomain, "connector", "tunneler")),
 	)
 
@@ -74,6 +83,7 @@ func main() {
 		caInst,
 		caCertPEM,
 		trustDomain, // SPIFFE trust domain (without scheme)
+		connectorEnrollToken,
 	)
 
 	controllerpb.RegisterEnrollmentServiceServer(

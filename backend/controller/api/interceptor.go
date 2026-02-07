@@ -40,6 +40,33 @@ func UnarySPIFFEInterceptor(trustDomain string, allowedRoles ...string) grpc.Una
 	}
 }
 
+// UnaryAuthInterceptor enforces SPIFFE identity on unary RPCs, with optional
+// method-level bypass for bootstrap enrollment.
+func UnaryAuthInterceptor(trustDomain string, unauthenticatedMethods map[string]struct{}, allowedRoles ...string) grpc.UnaryServerInterceptor {
+	roles := makeRoleSet(allowedRoles)
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (interface{}, error) {
+
+		if _, ok := unauthenticatedMethods[info.FullMethod]; ok {
+			return handler(ctx, req)
+		}
+
+		spiffeID, role, err := extractAndVerifySPIFFE(ctx, trustDomain, roles)
+		if err != nil {
+			return nil, err
+		}
+
+		ctx = context.WithValue(ctx, spiffeIDContextKey, spiffeID)
+		ctx = context.WithValue(ctx, roleContextKey, role)
+
+		return handler(ctx, req)
+	}
+}
+
 // StreamSPIFFEInterceptor enforces SPIFFE identity on streaming RPCs.
 func StreamSPIFFEInterceptor(trustDomain string, allowedRoles ...string) grpc.StreamServerInterceptor {
 	roles := makeRoleSet(allowedRoles)

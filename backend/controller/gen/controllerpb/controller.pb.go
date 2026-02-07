@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v3.21.12
-// source: proto/controller.proto
+// source: controller.proto
 
 package controllerpb
 
@@ -25,13 +25,16 @@ type EnrollRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	PublicKey     []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
+	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
+	PrivateIp     string                 `protobuf:"bytes,4,opt,name=private_ip,json=privateIp,proto3" json:"private_ip,omitempty"`
+	Version       string                 `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EnrollRequest) Reset() {
 	*x = EnrollRequest{}
-	mi := &file_proto_controller_proto_msgTypes[0]
+	mi := &file_controller_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -43,7 +46,7 @@ func (x *EnrollRequest) String() string {
 func (*EnrollRequest) ProtoMessage() {}
 
 func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_controller_proto_msgTypes[0]
+	mi := &file_controller_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -56,7 +59,7 @@ func (x *EnrollRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnrollRequest.ProtoReflect.Descriptor instead.
 func (*EnrollRequest) Descriptor() ([]byte, []int) {
-	return file_proto_controller_proto_rawDescGZIP(), []int{0}
+	return file_controller_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *EnrollRequest) GetId() string {
@@ -73,6 +76,27 @@ func (x *EnrollRequest) GetPublicKey() []byte {
 	return nil
 }
 
+func (x *EnrollRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+func (x *EnrollRequest) GetPrivateIp() string {
+	if x != nil {
+		return x.PrivateIp
+	}
+	return ""
+}
+
+func (x *EnrollRequest) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
 type EnrollResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Certificate   []byte                 `protobuf:"bytes,1,opt,name=certificate,proto3" json:"certificate,omitempty"`
@@ -83,7 +107,7 @@ type EnrollResponse struct {
 
 func (x *EnrollResponse) Reset() {
 	*x = EnrollResponse{}
-	mi := &file_proto_controller_proto_msgTypes[1]
+	mi := &file_controller_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -95,7 +119,7 @@ func (x *EnrollResponse) String() string {
 func (*EnrollResponse) ProtoMessage() {}
 
 func (x *EnrollResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_controller_proto_msgTypes[1]
+	mi := &file_controller_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -108,7 +132,7 @@ func (x *EnrollResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EnrollResponse.ProtoReflect.Descriptor instead.
 func (*EnrollResponse) Descriptor() ([]byte, []int) {
-	return file_proto_controller_proto_rawDescGZIP(), []int{1}
+	return file_controller_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *EnrollResponse) GetCertificate() []byte {
@@ -129,13 +153,16 @@ type ControlMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
 	Payload       []byte                 `protobuf:"bytes,2,opt,name=payload,proto3" json:"payload,omitempty"`
+	ConnectorId   string                 `protobuf:"bytes,3,opt,name=connector_id,json=connectorId,proto3" json:"connector_id,omitempty"`
+	PrivateIp     string                 `protobuf:"bytes,4,opt,name=private_ip,json=privateIp,proto3" json:"private_ip,omitempty"`
+	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ControlMessage) Reset() {
 	*x = ControlMessage{}
-	mi := &file_proto_controller_proto_msgTypes[2]
+	mi := &file_controller_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -147,7 +174,7 @@ func (x *ControlMessage) String() string {
 func (*ControlMessage) ProtoMessage() {}
 
 func (x *ControlMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_controller_proto_msgTypes[2]
+	mi := &file_controller_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -160,7 +187,7 @@ func (x *ControlMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ControlMessage.ProtoReflect.Descriptor instead.
 func (*ControlMessage) Descriptor() ([]byte, []int) {
-	return file_proto_controller_proto_rawDescGZIP(), []int{2}
+	return file_controller_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ControlMessage) GetType() string {
@@ -177,21 +204,50 @@ func (x *ControlMessage) GetPayload() []byte {
 	return nil
 }
 
-var File_proto_controller_proto protoreflect.FileDescriptor
+func (x *ControlMessage) GetConnectorId() string {
+	if x != nil {
+		return x.ConnectorId
+	}
+	return ""
+}
 
-const file_proto_controller_proto_rawDesc = "" +
+func (x *ControlMessage) GetPrivateIp() string {
+	if x != nil {
+		return x.PrivateIp
+	}
+	return ""
+}
+
+func (x *ControlMessage) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+var File_controller_proto protoreflect.FileDescriptor
+
+const file_controller_proto_rawDesc = "" +
 	"\n" +
-	"\x16proto/controller.proto\x12\rcontroller.v1\">\n" +
+	"\x10controller.proto\x12\rcontroller.v1\"\x8d\x01\n" +
 	"\rEnrollRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
-	"public_key\x18\x02 \x01(\fR\tpublicKey\"Y\n" +
+	"public_key\x18\x02 \x01(\fR\tpublicKey\x12\x14\n" +
+	"\x05token\x18\x03 \x01(\tR\x05token\x12\x1d\n" +
+	"\n" +
+	"private_ip\x18\x04 \x01(\tR\tprivateIp\x12\x18\n" +
+	"\aversion\x18\x05 \x01(\tR\aversion\"Y\n" +
 	"\x0eEnrollResponse\x12 \n" +
 	"\vcertificate\x18\x01 \x01(\fR\vcertificate\x12%\n" +
-	"\x0eca_certificate\x18\x02 \x01(\fR\rcaCertificate\">\n" +
+	"\x0eca_certificate\x18\x02 \x01(\fR\rcaCertificate\"\x98\x01\n" +
 	"\x0eControlMessage\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12\x18\n" +
-	"\apayload\x18\x02 \x01(\fR\apayload2\xf8\x01\n" +
+	"\apayload\x18\x02 \x01(\fR\apayload\x12!\n" +
+	"\fconnector_id\x18\x03 \x01(\tR\vconnectorId\x12\x1d\n" +
+	"\n" +
+	"private_ip\x18\x04 \x01(\tR\tprivateIp\x12\x16\n" +
+	"\x06status\x18\x05 \x01(\tR\x06status2\xf8\x01\n" +
 	"\x11EnrollmentService\x12N\n" +
 	"\x0fEnrollConnector\x12\x1c.controller.v1.EnrollRequest\x1a\x1d.controller.v1.EnrollResponse\x12M\n" +
 	"\x0eEnrollTunneler\x12\x1c.controller.v1.EnrollRequest\x1a\x1d.controller.v1.EnrollResponse\x12D\n" +
@@ -200,24 +256,24 @@ const file_proto_controller_proto_rawDesc = "" +
 	"\aConnect\x12\x1d.controller.v1.ControlMessage\x1a\x1d.controller.v1.ControlMessage(\x010\x01B*Z(controller/gen/controllerpb;controllerpbb\x06proto3"
 
 var (
-	file_proto_controller_proto_rawDescOnce sync.Once
-	file_proto_controller_proto_rawDescData []byte
+	file_controller_proto_rawDescOnce sync.Once
+	file_controller_proto_rawDescData []byte
 )
 
-func file_proto_controller_proto_rawDescGZIP() []byte {
-	file_proto_controller_proto_rawDescOnce.Do(func() {
-		file_proto_controller_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_proto_controller_proto_rawDesc), len(file_proto_controller_proto_rawDesc)))
+func file_controller_proto_rawDescGZIP() []byte {
+	file_controller_proto_rawDescOnce.Do(func() {
+		file_controller_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_controller_proto_rawDesc), len(file_controller_proto_rawDesc)))
 	})
-	return file_proto_controller_proto_rawDescData
+	return file_controller_proto_rawDescData
 }
 
-var file_proto_controller_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
-var file_proto_controller_proto_goTypes = []any{
+var file_controller_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_controller_proto_goTypes = []any{
 	(*EnrollRequest)(nil),  // 0: controller.v1.EnrollRequest
 	(*EnrollResponse)(nil), // 1: controller.v1.EnrollResponse
 	(*ControlMessage)(nil), // 2: controller.v1.ControlMessage
 }
-var file_proto_controller_proto_depIdxs = []int32{
+var file_controller_proto_depIdxs = []int32{
 	0, // 0: controller.v1.EnrollmentService.EnrollConnector:input_type -> controller.v1.EnrollRequest
 	0, // 1: controller.v1.EnrollmentService.EnrollTunneler:input_type -> controller.v1.EnrollRequest
 	0, // 2: controller.v1.EnrollmentService.Renew:input_type -> controller.v1.EnrollRequest
@@ -233,26 +289,26 @@ var file_proto_controller_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_proto_controller_proto_init() }
-func file_proto_controller_proto_init() {
-	if File_proto_controller_proto != nil {
+func init() { file_controller_proto_init() }
+func file_controller_proto_init() {
+	if File_controller_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_controller_proto_rawDesc), len(file_proto_controller_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_controller_proto_rawDesc), len(file_controller_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   2,
 		},
-		GoTypes:           file_proto_controller_proto_goTypes,
-		DependencyIndexes: file_proto_controller_proto_depIdxs,
-		MessageInfos:      file_proto_controller_proto_msgTypes,
+		GoTypes:           file_controller_proto_goTypes,
+		DependencyIndexes: file_controller_proto_depIdxs,
+		MessageInfos:      file_controller_proto_msgTypes,
 	}.Build()
-	File_proto_controller_proto = out.File
-	file_proto_controller_proto_goTypes = nil
-	file_proto_controller_proto_depIdxs = nil
+	File_controller_proto = out.File
+	file_controller_proto_goTypes = nil
+	file_controller_proto_depIdxs = nil
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -20,17 +21,19 @@ import (
 type EnrollmentServer struct {
 	controllerpb.UnimplementedEnrollmentServiceServer
 
-	CA          *ca.CA
-	CAPEM       []byte
-	TrustDomain string
+	CA                   *ca.CA
+	CAPEM                []byte
+	TrustDomain          string
+	ConnectorEnrollToken string
 }
 
 // NewEnrollmentServer creates a new EnrollmentServer.
-func NewEnrollmentServer(caInst *ca.CA, caPEM []byte, trustDomain string) *EnrollmentServer {
+func NewEnrollmentServer(caInst *ca.CA, caPEM []byte, trustDomain, connectorToken string) *EnrollmentServer {
 	return &EnrollmentServer{
-		CA:          caInst,
-		CAPEM:       caPEM,
-		TrustDomain: trustDomain,
+		CA:                   caInst,
+		CAPEM:                caPEM,
+		TrustDomain:          trustDomain,
+		ConnectorEnrollToken: connectorToken,
 	}
 }
 
@@ -43,13 +46,19 @@ func (s *EnrollmentServer) EnrollConnector(
 	if !validID(req.GetId()) {
 		return nil, status.Error(codes.InvalidArgument, "missing connector id")
 	}
+	if req.GetPrivateIp() == "" {
+		return nil, status.Error(codes.InvalidArgument, "missing private ip")
+	}
+	if req.GetVersion() == "" {
+		return nil, status.Error(codes.InvalidArgument, "missing version")
+	}
 
 	pubKey, err := parsePublicKey(req.GetPublicKey())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid public key: %v", err)
 	}
 
-	if err := s.authorize(ctx, "connector", req.GetId()); err != nil {
+	if err := s.authorizeConnectorToken(req.GetToken()); err != nil {
 		return nil, err
 	}
 
@@ -68,6 +77,9 @@ func (s *EnrollmentServer) EnrollConnector(
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "certificate issuance failed: %v", err)
 	}
+
+	// Registration side-effect: log enrollment details.
+	logEnrollment("connector", req.GetId(), req.GetPrivateIp(), req.GetVersion())
 
 	return &controllerpb.EnrollResponse{
 		Certificate:   certPEM,
@@ -190,6 +202,19 @@ func (s *EnrollmentServer) authorize(ctx context.Context, expectedRole, expected
 	return nil
 }
 
+func (s *EnrollmentServer) authorizeConnectorToken(provided string) error {
+	if s.ConnectorEnrollToken == "" {
+		return status.Error(codes.FailedPrecondition, "connector enrollment token not configured")
+	}
+	if provided == "" {
+		return status.Error(codes.Unauthenticated, "missing enrollment token")
+	}
+	if subtle.ConstantTimeCompare([]byte(provided), []byte(s.ConnectorEnrollToken)) != 1 {
+		return status.Error(codes.PermissionDenied, "invalid enrollment token")
+	}
+	return nil
+}
+
 func (s *EnrollmentServer) identityFromContext(ctx context.Context) (string, string, error) {
 	spiffeID, ok := SPIFFEIDFromContext(ctx)
 	if !ok {
@@ -207,6 +232,11 @@ func (s *EnrollmentServer) identityFromContext(ctx context.Context) (string, str
 	}
 
 	return role, id, nil
+}
+
+func logEnrollment(role, id, privateIP, version string) {
+	// Keep as a structured line to aid operator log parsing.
+	fmt.Printf("enrollment: role=%s id=%s private_ip=%s version=%s\n", role, id, privateIP, version)
 }
 
 func validID(id string) bool {

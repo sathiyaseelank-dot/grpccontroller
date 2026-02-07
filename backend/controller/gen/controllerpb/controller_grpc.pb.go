@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v3.21.12
-// source: proto/controller.proto
+// source: controller.proto
 
 package controllerpb
 
@@ -193,7 +193,7 @@ var EnrollmentService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/controller.proto",
+	Metadata: "controller.proto",
 }
 
 const (
@@ -289,5 +289,5 @@ var ControlPlane_ServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 	},
-	Metadata: "proto/controller.proto",
+	Metadata: "controller.proto",
 }

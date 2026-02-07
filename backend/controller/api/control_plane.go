@@ -45,5 +45,8 @@ func (s *ControlPlaneServer) Connect(stream controllerpb.ControlPlane_ConnectSer
 				return err
 			}
 		}
+		if msg.GetType() == "heartbeat" {
+			log.Printf("heartbeat: connector_id=%s private_ip=%s status=%s", msg.GetConnectorId(), msg.GetPrivateIp(), msg.GetStatus())
+		}
 	}
 }

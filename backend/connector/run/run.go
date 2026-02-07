@@ -25,10 +25,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-const (
-	defaultConnectorListen = ":9443"
-)
-
 // Run starts the long-running connector service.
 func Run() error {
 	cfg, err := configFromEnv()
@@ -62,16 +58,20 @@ func Run() error {
 
 	log.Printf("connector enrolled as %s", spiffeID)
 
-	serverErr := make(chan error, 1)
-	go func() {
-		serverErr <- runConnectorServer(cfg.listenAddr, cfg.trustDomain, store, rootPool)
-	}()
-
 	reloadCh := make(chan struct{}, 1)
-	go controlPlaneLoop(ctx, cfg.controllerAddr, cfg.trustDomain, store, rootPool, reloadCh)
+	go controlPlaneLoop(ctx, cfg.controllerAddr, cfg.trustDomain, cfg.connectorID, cfg.privateIP, store, rootPool, reloadCh)
 	go renewalLoop(ctx, cfg.controllerAddr, cfg.connectorID, cfg.trustDomain, store, rootPool, reloadCh)
 
-	return <-serverErr
+	if cfg.listenAddr != "" {
+		serverErr := make(chan error, 1)
+		go func() {
+			serverErr <- runConnectorServer(cfg.listenAddr, cfg.trustDomain, store, rootPool)
+		}()
+		return <-serverErr
+	}
+
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 type runtimeConfig struct {
@@ -79,6 +79,7 @@ type runtimeConfig struct {
 	connectorID    string
 	trustDomain    string
 	listenAddr     string
+	privateIP      string
 }
 
 func configFromEnv() (runtimeConfig, error) {
@@ -90,9 +91,6 @@ func configFromEnv() (runtimeConfig, error) {
 	if trustDomain == "" {
 		trustDomain = "mycorp.internal"
 	}
-	if listenAddr == "" {
-		listenAddr = defaultConnectorListen
-	}
 	if controllerAddr == "" {
 		return runtimeConfig{}, fmt.Errorf("CONTROLLER_ADDR is not set")
 	}
@@ -100,11 +98,17 @@ func configFromEnv() (runtimeConfig, error) {
 		return runtimeConfig{}, fmt.Errorf("CONNECTOR_ID is not set")
 	}
 
+	privateIP, err := enroll.ResolvePrivateIP(controllerAddr)
+	if err != nil {
+		return runtimeConfig{}, err
+	}
+
 	return runtimeConfig{
 		controllerAddr: controllerAddr,
 		connectorID:    connectorID,
 		trustDomain:    trustDomain,
 		listenAddr:     listenAddr,
+		privateIP:      privateIP,
 	}, nil
 }
 
@@ -133,7 +137,7 @@ func runConnectorServer(addr, trustDomain string, store *tlsutil.CertStore, root
 	return grpcServer.Serve(lis)
 }
 
-func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, reloadCh <-chan struct{}) {
+func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain, connectorID, privateIP string, store *tlsutil.CertStore, roots *x509.CertPool, reloadCh <-chan struct{}) {
 	backoff := 2 * time.Second
 	for {
 		select {
@@ -145,7 +149,7 @@ func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain string, s
 		sessionCtx, cancel := context.WithCancel(ctx)
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- connectControlPlane(sessionCtx, controllerAddr, trustDomain, store, roots)
+			errCh <- connectControlPlane(sessionCtx, controllerAddr, trustDomain, connectorID, privateIP, store, roots)
 		}()
 
 		select {
@@ -176,7 +180,7 @@ func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain string, s
 	}
 }
 
-func connectControlPlane(ctx context.Context, controllerAddr, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool) error {
+func connectControlPlane(ctx context.Context, controllerAddr, trustDomain, connectorID, privateIP string, store *tlsutil.CertStore, roots *x509.CertPool) error {
 	tlsConfig := &tls.Config{
 		MinVersion:           tls.VersionTLS13,
 		GetClientCertificate: store.GetClientCertificate,
@@ -222,7 +226,7 @@ func connectControlPlane(ctx context.Context, controllerAddr, trustDomain string
 		}
 	}()
 
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -232,7 +236,12 @@ func connectControlPlane(ctx context.Context, controllerAddr, trustDomain string
 		case err := <-recvErr:
 			return err
 		case <-ticker.C:
-			if err := stream.Send(&controllerpb.ControlMessage{Type: "ping"}); err != nil {
+			if err := stream.Send(&controllerpb.ControlMessage{
+				Type:        "heartbeat",
+				ConnectorId: connectorID,
+				PrivateIp:   privateIP,
+				Status:      "ONLINE",
+			}); err != nil {
 				return err
 			}
 		}
