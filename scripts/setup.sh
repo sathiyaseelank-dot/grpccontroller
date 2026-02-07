@@ -42,7 +42,7 @@ esac
 
 binary="grpcconnector-${os}-${arch}"
 release_url="https://github.com/sathiyaseelank-dot/grpccontroller/releases/latest/download/${binary}"
-unit_url="https://raw.githubusercontent.com/sathiyaseelank-dot/grpccontroller/main/backend/systemd/grpcconnector.service"
+unit_url="https://raw.githubusercontent.com/sathiyaseelank-dot/grpccontroller/main/systemd/grpcconnector.service"
 
 tmpdir="$(mktemp -d)"
 cleanup() {
