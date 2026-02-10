@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"controller/admin"
@@ -35,6 +36,7 @@ func main() {
 	if trustDomain == "" {
 		trustDomain = "mycorp.internal"
 	}
+	trustDomain = normalizeTrustDomain(trustDomain)
 	adminAddr := os.Getenv("ADMIN_HTTP_ADDR")
 	if adminAddr == "" {
 		adminAddr = ":8080"
@@ -142,7 +144,7 @@ func main() {
 
 func loadCAFromFiles(certPEM, keyPEM []byte) ([]byte, []byte) {
 	certPath := "ca/ca.crt"
-	keyPath := "ca/ca.key"
+	keyPath := "ca/ca.pkcs8.key"
 
 	if len(certPEM) == 0 {
 		if b, err := os.ReadFile(certPath); err == nil {
@@ -155,6 +157,12 @@ func loadCAFromFiles(certPEM, keyPEM []byte) ([]byte, []byte) {
 		}
 	}
 	return certPEM, keyPEM
+}
+
+func normalizeTrustDomain(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimSuffix(v, ".")
+	return v
 }
 
 func loadOrIssueControllerCert(caInst *ca.CA, trustDomain string) (tls.Certificate, error) {

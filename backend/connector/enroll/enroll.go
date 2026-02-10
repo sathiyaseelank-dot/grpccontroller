@@ -12,7 +12,6 @@ import (
 	"os"
 	"time"
 
-	"connector/internal/bootstrap"
 	"connector/internal/tlsutil"
 	controllerpb "controller/gen/controllerpb"
 
@@ -45,8 +44,9 @@ func Run() error {
 		return err
 	}
 
-	_ = cert
-	_ = caPEM
+	if err := PersistIdentity(cert, caPEM); err != nil {
+		return err
+	}
 	fmt.Printf("Enrolled connector with SPIFFE ID: %s\n", spiffeID)
 	return nil
 }
@@ -56,10 +56,11 @@ func ConfigFromEnvEnroll() (Config, error) {
 	controllerAddr := os.Getenv("CONTROLLER_ADDR")
 	connectorID := os.Getenv("CONNECTOR_ID")
 	trustDomain := os.Getenv("TRUST_DOMAIN")
-	token := os.Getenv("MY_CONNECTOR_TOKEN")
+	token := os.Getenv("ENROLLMENT_TOKEN")
 	if trustDomain == "" {
 		trustDomain = "mycorp.internal"
 	}
+	trustDomain = normalizeTrustDomain(trustDomain)
 
 	if controllerAddr == "" {
 		return Config{}, fmt.Errorf("CONTROLLER_ADDR is not set")
@@ -68,7 +69,7 @@ func ConfigFromEnvEnroll() (Config, error) {
 		return Config{}, fmt.Errorf("CONNECTOR_ID is not set")
 	}
 	if token == "" {
-		return Config{}, fmt.Errorf("MY_CONNECTOR_TOKEN is not set")
+		return Config{}, fmt.Errorf("ENROLLMENT_TOKEN is not set")
 	}
 
 	privateIP, err := ResolvePrivateIP(controllerAddr)
@@ -96,6 +97,7 @@ func ConfigFromEnvRun() (Config, error) {
 	if trustDomain == "" {
 		trustDomain = "mycorp.internal"
 	}
+	trustDomain = normalizeTrustDomain(trustDomain)
 
 	if controllerAddr == "" {
 		return Config{}, fmt.Errorf("CONTROLLER_ADDR is not set")
@@ -138,8 +140,11 @@ func Enroll(ctx context.Context, cfg Config) (tls.Certificate, []byte, []byte, s
 		Bytes: pubDER,
 	})
 
-	bootstrapCAPEM := bootstrap.CAPEM()
-	rootPool, err := tlsutil.RootPoolFromPEM(bootstrapCAPEM)
+	localCAPEM, err := loadExplicitCA()
+	if err != nil {
+		return tls.Certificate{}, nil, nil, "", err
+	}
+	rootPool, err := tlsutil.RootPoolFromPEM(localCAPEM)
 	if err != nil {
 		return tls.Certificate{}, nil, nil, "", err
 	}
