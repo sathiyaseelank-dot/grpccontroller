@@ -14,33 +14,31 @@ export function CreateToken() {
   const [token, setToken] = useState<TokenResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const handleCreateToken = async () => {
     setLoading(true)
     setToken(null)
     setCopied(false)
+    setError(null)
 
     try {
       const res = await fetch("/api/admin/tokens", { method: "POST" })
+      if (!res.ok) {
+        const message = await res.text()
+        throw new Error(message || "Failed to create token")
+      }
       const data: TokenResponse = await res.json()
       setToken(data)
-    } catch {
-      // In a real app, display error to user
-      // For demo, generate a placeholder
-      setToken({
-        token: `zt_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`,
-        expires_at: new Date(Date.now() + 86400000).toISOString(),
-      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create token")
     } finally {
       setLoading(false)
     }
   }
 
   const installCommand = token
-    ? `curl https://controller.example.com/setup.sh | sudo \\
-    MY_CONNECTOR_TOKEN=${token.token} \\
-    MY_NETWORK=my-network \\
-    bash`
+    ? `curl -fsSL https://raw.githubusercontent.com/sathiyaseelank-dot/grpccontroller/main/scripts/setup.sh | sudo CONNECTOR_ID="connector-local-01" CONTROLLER_ADDR="127.0.0.1:8443" MY_CONNECTOR_TOKEN="${token.token}" bash`
     : ""
 
   const handleCopy = async () => {
@@ -81,6 +79,11 @@ export function CreateToken() {
               </>
             )}
           </Button>
+          {error && (
+            <p className="mt-3 text-sm text-destructive" role="alert">
+              {error}
+            </p>
+          )}
         </CardContent>
       </Card>
 

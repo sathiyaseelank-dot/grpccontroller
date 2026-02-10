@@ -21,26 +21,25 @@ interface Connector {
   last_seen: string
 }
 
-// Mock data for demo — will be replaced by real API
-const MOCK_CONNECTORS: Connector[] = [
-  { id: "conn-7f3a92", status: "ONLINE", private_ip: "10.0.2.15", last_seen: "5 seconds ago" },
-  { id: "conn-a1b2c3", status: "ONLINE", private_ip: "10.0.3.22", last_seen: "12 seconds ago" },
-  { id: "conn-d4e5f6", status: "OFFLINE", private_ip: "10.0.1.8", last_seen: "3 minutes ago" },
-]
-
 export function ConnectorsTable() {
   const [connectors, setConnectors] = useState<Connector[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
+  const [error, setError] = useState<string | null>(null)
 
   const fetchConnectors = useCallback(async () => {
     try {
+      setError(null)
       const res = await fetch("/api/admin/connectors")
+      if (!res.ok) {
+        const message = await res.text()
+        throw new Error(message || "Failed to load connectors")
+      }
       const data: Connector[] = await res.json()
       setConnectors(data)
-    } catch {
-      // Fallback to mock data for demo
-      setConnectors(MOCK_CONNECTORS)
+    } catch (err) {
+      setConnectors([])
+      setError(err instanceof Error ? err.message : "Failed to load connectors")
     } finally {
       setLoading(false)
       setLastRefresh(new Date())
@@ -127,6 +126,16 @@ export function ConnectorsTable() {
           {loading ? (
             <div className="flex items-center justify-center py-12">
               <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : error ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-16">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+                <Network className="h-6 w-6 text-destructive" />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-medium text-foreground">Failed to load connectors</p>
+                <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+              </div>
             </div>
           ) : connectors.length === 0 ? (
             <div className="flex flex-col items-center justify-center gap-3 py-16">

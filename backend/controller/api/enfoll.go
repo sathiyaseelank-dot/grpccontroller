@@ -11,6 +11,7 @@ import (
 	controllerpb "controller/gen/controllerpb"
 
 	"controller/ca"
+	"controller/state"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -23,14 +24,18 @@ type EnrollmentServer struct {
 	CA          *ca.CA
 	CAPEM       []byte
 	TrustDomain string
+	Tokens      *state.TokenStore
+	Registry    *state.Registry
 }
 
 // NewEnrollmentServer creates a new EnrollmentServer.
-func NewEnrollmentServer(caInst *ca.CA, caPEM []byte, trustDomain string) *EnrollmentServer {
+func NewEnrollmentServer(caInst *ca.CA, caPEM []byte, trustDomain string, tokens *state.TokenStore, registry *state.Registry) *EnrollmentServer {
 	return &EnrollmentServer{
 		CA:          caInst,
 		CAPEM:       caPEM,
 		TrustDomain: trustDomain,
+		Tokens:      tokens,
+		Registry:    registry,
 	}
 }
 
@@ -55,6 +60,10 @@ func (s *EnrollmentServer) EnrollConnector(
 		return nil, status.Errorf(codes.InvalidArgument, "invalid public key: %v", err)
 	}
 
+	if err := s.authorizeConnectorToken(req.GetToken(), req.GetId()); err != nil {
+		return nil, err
+	}
+
 	spiffeID := fmt.Sprintf(
 		"spiffe://%s/connector/%s",
 		s.TrustDomain,
@@ -66,6 +75,8 @@ func (s *EnrollmentServer) EnrollConnector(
 		spiffeID,
 		pubKey,
 		1*time.Hour,
+		nil, 
+		nil,
 	)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "certificate issuance failed: %v", err)
@@ -73,6 +84,9 @@ func (s *EnrollmentServer) EnrollConnector(
 
 	// Registration side-effect: log enrollment details.
 	logEnrollment("connector", req.GetId(), req.GetPrivateIp(), req.GetVersion())
+	if s.Registry != nil {
+		s.Registry.Register(req.GetId(), req.GetPrivateIp(), req.GetVersion())
+	}
 
 	return &controllerpb.EnrollResponse{
 		Certificate:   certPEM,
@@ -110,6 +124,8 @@ func (s *EnrollmentServer) EnrollTunneler(
 		spiffeID,
 		pubKey,
 		30*time.Minute,
+		nil,
+		nil,
 	)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "certificate issuance failed: %v", err)
@@ -151,7 +167,7 @@ func (s *EnrollmentServer) Renew(
 		ttl = 1 * time.Hour
 	}
 
-	certPEM, err := ca.IssueWorkloadCert(s.CA, spiffeID, pubKey, ttl)
+	certPEM, err := ca.IssueWorkloadCert(s.CA, spiffeID, pubKey, ttl, nil, nil)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "certificate renewal failed: %v", err)
 	}
@@ -191,6 +207,16 @@ func (s *EnrollmentServer) authorize(ctx context.Context, expectedRole, expected
 	}
 	if id != expectedID {
 		return status.Error(codes.PermissionDenied, "id mismatch for enrollment")
+	}
+	return nil
+}
+
+func (s *EnrollmentServer) authorizeConnectorToken(token, connectorID string) error {
+	if s.Tokens == nil {
+		return status.Error(codes.FailedPrecondition, "token service unavailable")
+	}
+	if err := s.Tokens.ConsumeToken(token, connectorID); err != nil {
+		return status.Error(codes.PermissionDenied, "invalid enrollment token")
 	}
 	return nil
 }

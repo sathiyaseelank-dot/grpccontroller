@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"math/big"
+	"net"
 	"net/url"
 	"time"
 )
@@ -23,6 +24,8 @@ func IssueWorkloadCert(
 	spiffeID string,
 	pubKey crypto.PublicKey,
 	ttl time.Duration,
+	dnsNames []string,
+	ipAddrs []net.IP,
 ) ([]byte, error) {
 
 	if ca == nil || ca.Cert == nil || ca.Key == nil {
@@ -66,7 +69,9 @@ func IssueWorkloadCert(
 		IsCA:                  false,
 
 		// Enforce exactly one URI SAN and no CN.
-		URIs: []*url.URL{uri},
+		URIs:        []*url.URL{uri},
+		DNSNames:    dnsNames,
+		IPAddresses: ipAddrs,
 	}
 
 	der, err := x509.CreateCertificate(

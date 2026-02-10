@@ -5,6 +5,7 @@ import (
 	"log"
 
 	controllerpb "controller/gen/controllerpb"
+	"controller/state"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -13,12 +14,13 @@ import (
 // ControlPlaneServer implements the controller.v1.ControlPlane service.
 type ControlPlaneServer struct {
 	controllerpb.UnimplementedControlPlaneServer
+	registry *state.Registry
 }
 
 // NewControlPlaneServer creates a new control plane server.
-func NewControlPlaneServer(trustDomain string) *ControlPlaneServer {
+func NewControlPlaneServer(trustDomain string, registry *state.Registry) *ControlPlaneServer {
 	_ = trustDomain
-	return &ControlPlaneServer{}
+	return &ControlPlaneServer{registry: registry}
 }
 
 // Connect handles a persistent control-plane stream from connectors.
@@ -46,6 +48,9 @@ func (s *ControlPlaneServer) Connect(stream controllerpb.ControlPlane_ConnectSer
 			}
 		}
 		if msg.GetType() == "heartbeat" {
+			if s.registry != nil {
+				s.registry.RecordHeartbeat(msg.GetConnectorId(), msg.GetPrivateIp())
+			}
 			log.Printf("heartbeat: connector_id=%s private_ip=%s status=%s", msg.GetConnectorId(), msg.GetPrivateIp(), msg.GetStatus())
 		}
 	}
