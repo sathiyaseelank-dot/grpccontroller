@@ -13,6 +13,8 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"connector/enroll"
@@ -39,6 +41,10 @@ func Run() error {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	if systemdWatchdogEnabled() {
+		go systemdWatchdogLoop(ctx)
+	}
 
 	workloadCert, caPEM, notAfter, err := enroll.LoadIdentity()
 	if err != nil {
@@ -86,6 +92,69 @@ func Run() error {
 
 	<-ctx.Done()
 	return ctx.Err()
+}
+
+func systemdWatchdogEnabled() bool {
+	for _, arg := range os.Args[1:] {
+		if arg == "--systemd-watchdog" {
+			return true
+		}
+	}
+	return false
+}
+
+func systemdWatchdogLoop(ctx context.Context) {
+	socket := os.Getenv("NOTIFY_SOCKET")
+	if socket == "" {
+		return
+	}
+	interval := watchdogInterval()
+	if interval <= 0 {
+		return
+	}
+
+	if err := systemdNotify(socket, "READY=1"); err != nil {
+		log.Printf("systemd notify failed: %v", err)
+		return
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			_ = systemdNotify(socket, "WATCHDOG=1")
+		}
+	}
+}
+
+func watchdogInterval() time.Duration {
+	usecStr := strings.TrimSpace(os.Getenv("WATCHDOG_USEC"))
+	if usecStr == "" {
+		return 0
+	}
+	usec, err := strconv.ParseInt(usecStr, 10, 64)
+	if err != nil || usec <= 0 {
+		return 0
+	}
+	d := time.Duration(usec) * time.Microsecond
+	return d / 2
+}
+
+func systemdNotify(socket, msg string) error {
+	addr := socket
+	if strings.HasPrefix(addr, "@") {
+		addr = "\x00" + addr[1:]
+	}
+	conn, err := net.DialUnix("unixgram", nil, &net.UnixAddr{Name: addr, Net: "unixgram"})
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	_, err = conn.Write([]byte(msg))
+	return err
 }
 
 type runtimeConfig struct {
