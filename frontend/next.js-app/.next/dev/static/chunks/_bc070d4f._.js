@@ -1082,7 +1082,7 @@ function CreateToken() {
             setLoading(false);
         }
     };
-    const installCommand = token ? `curl -fsSL https://raw.githubusercontent.com/sathiyaseelank-dot/grpccontroller/main/scripts/setup.sh | sudo CONTROLLER_ADDR="127.0.0.1:8443" CONNECTOR_ID="connector-local-01" ENROLLMENT_TOKEN="${token.token}" CONTROLLER_CA="/etc/grpcconnector/ca.crt" bash` : "";
+    const installCommand = token ? `curl -fsSL https://raw.githubusercontent.com/sathiyaseelank-dot/grpccontroller/main/scripts/setup.sh | sudo CONTROLLER_ADDR="127.0.0.1:8443" CONNECTOR_ID="connector-local-01" ENROLLMENT_TOKEN="${token.token}" CONTROLLER_CA_PEM="/etc/grpcconnector/ca.crt" bash` : "";
     const handleCopy = async ()=>{
         await navigator.clipboard.writeText(installCommand);
         setCopied(true);
