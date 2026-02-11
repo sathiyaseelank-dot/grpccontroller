@@ -83,11 +83,17 @@ if [[ -f "${config_file}" ]]; then
   cp "${config_file}" "${config_file}.${ts}.bak"
 fi
 
-if [[ -f "${CONTROLLER_CA_PATH}" ]]; then
-  cp "${CONTROLLER_CA_PATH}" "${bundled_ca}"
-  chmod 0600 "${bundled_ca}"
-  CONTROLLER_CA_PATH="${bundled_ca}"
+echo "Installing controller CA..."
+if [[ -z "${CONTROLLER_CA_PATH}" ]]; then
+  echo "ERROR: CONTROLLER_CA_PATH is not set" >&2
+  exit 1
 fi
+if [[ ! -f "${CONTROLLER_CA_PATH}" ]]; then
+  echo "ERROR: Controller CA file not found at ${CONTROLLER_CA_PATH}" >&2
+  exit 1
+fi
+install -m 0644 "${CONTROLLER_CA_PATH}" "${bundled_ca}"
+CONTROLLER_CA_PATH="${bundled_ca}"
 
 {
   echo "CONTROLLER_ADDR=${CONTROLLER_ADDR}"
