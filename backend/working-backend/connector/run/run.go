@@ -38,6 +38,7 @@ func Run() error {
 	if err != nil {
 		return err
 	}
+	enrollCfg.Token = os.Getenv("ENROLLMENT_TOKEN")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
