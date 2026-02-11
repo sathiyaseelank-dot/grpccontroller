@@ -80,10 +80,10 @@ func normalizeTrustDomain(v string) string {
 }
 
 func loadExplicitCA() ([]byte, error) {
-	caPath := strings.TrimSpace(os.Getenv("CONTROLLER_CA"))
+	caPath := strings.TrimSpace(os.Getenv("CONTROLLER_CA_PATH"))
 	if caPath == "" {
 		return nil, fmt.Errorf(
-			"CONTROLLER_CA is not set (explicit controller trust is required)",
+			"CONTROLLER_CA_PATH is not set (explicit controller trust is required)",
 		)
 	}
 

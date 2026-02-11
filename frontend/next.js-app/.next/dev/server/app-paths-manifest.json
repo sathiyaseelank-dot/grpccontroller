@@ -1,5 +1,4 @@
 {
-  "/api/admin/connectors/route": "app/api/admin/connectors/route.js",
   "/api/admin/tokens/route": "app/api/admin/tokens/route.js",
   "/page": "app/page.js"
 }

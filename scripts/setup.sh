@@ -10,7 +10,7 @@ if [[ "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
-required_envs=(CONTROLLER_ADDR CONNECTOR_ID ENROLLMENT_TOKEN CONTROLLER_CA_PEM)
+required_envs=(CONTROLLER_ADDR CONNECTOR_ID ENROLLMENT_TOKEN CONTROLLER_CA_PATH)
 for var in "${required_envs[@]}"; do
   if [[ -z "${!var:-}" ]]; then
     echo "ERROR: ${var} is required." >&2
@@ -83,17 +83,17 @@ if [[ -f "${config_file}" ]]; then
   cp "${config_file}" "${config_file}.${ts}.bak"
 fi
 
-if [[ -f "${CONTROLLER_CA_PEM}" ]]; then
-  cp "${CONTROLLER_CA_PEM}" "${bundled_ca}"
+if [[ -f "${CONTROLLER_CA_PATH}" ]]; then
+  cp "${CONTROLLER_CA_PATH}" "${bundled_ca}"
   chmod 0600 "${bundled_ca}"
-  CONTROLLER_CA_PEM="${bundled_ca}"
+  CONTROLLER_CA_PATH="${bundled_ca}"
 fi
 
 {
   echo "CONTROLLER_ADDR=${CONTROLLER_ADDR}"
   echo "CONNECTOR_ID=${CONNECTOR_ID}"
   echo "ENROLLMENT_TOKEN=${ENROLLMENT_TOKEN}"
-  echo "CONTROLLER_CA_PEM=${CONTROLLER_CA_PEM}"
+  echo "CONTROLLER_CA_PATH=${CONTROLLER_CA_PATH}"
   if [[ -n "${CONNECTOR_PRIVATE_IP:-}" ]]; then
     echo "CONNECTOR_PRIVATE_IP=${CONNECTOR_PRIVATE_IP}"
   fi
