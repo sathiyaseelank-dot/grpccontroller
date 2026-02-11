@@ -43,6 +43,10 @@ func main() {
 	}
 	adminAuthToken := os.Getenv("ADMIN_AUTH_TOKEN")
 	internalAuthToken := os.Getenv("INTERNAL_API_TOKEN")
+	tokenStorePath := os.Getenv("TOKEN_STORE_PATH")
+	if tokenStorePath == "" {
+		tokenStorePath = "/var/lib/grpccontroller/tokens.json"
+	}
 
 	if len(caCertPEM) == 0 || len(caKeyPEM) == 0 {
 		log.Fatal("INTERNAL_CA_CERT or INTERNAL_CA_KEY is not set and ca/ca.crt+ca/ca.key not found")
@@ -83,7 +87,7 @@ func main() {
 	creds := credentials.NewTLS(tlsConfig)
 
 	registry := state.NewRegistry()
-	tokenStore := state.NewTokenStore(10 * time.Minute)
+	tokenStore := state.NewTokenStore(0, tokenStorePath)
 
 	// ---- gRPC server ----
 	grpcServer := grpc.NewServer(

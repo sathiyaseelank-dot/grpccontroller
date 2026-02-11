@@ -46,35 +46,22 @@ func Run() error {
 		go systemdWatchdogLoop(ctx)
 	}
 
-	workloadCert, caPEM, notAfter, err := enroll.LoadIdentity()
-	if err != nil {
-		log.Printf("no existing identity found; enrolling")
-		token := os.Getenv("ENROLLMENT_TOKEN")
-		if token == "" {
-			return fmt.Errorf("ENROLLMENT_TOKEN is required for first enrollment")
-		}
-		enrollCfg.Token = token
-
-		cert, certPEM, newCA, spiffeID, err := enroll.Enroll(ctx, enrollCfg)
-		if err != nil {
-			return err
-		}
-		if err := enroll.PersistIdentity(cert, newCA); err != nil {
-			return err
-		}
-
-		workloadCert = cert
-		caPEM = newCA
-		certInfo, err := parseLeafCert(certPEM)
-		if err != nil {
-			return err
-		}
-		notAfter = certInfo.NotAfter
-
-		log.Printf("connector enrolled as %s", spiffeID)
-	} else {
-		log.Printf("using existing connector identity")
+	if enrollCfg.Token == "" {
+		return fmt.Errorf("ENROLLMENT_TOKEN is required for enrollment")
 	}
+	cert, certPEM, caPEM, spiffeID, err := enroll.Enroll(ctx, enrollCfg)
+	if err != nil {
+		return err
+	}
+
+	certInfo, err := parseLeafCert(certPEM)
+	if err != nil {
+		return err
+	}
+	workloadCert := cert
+	notAfter := certInfo.NotAfter
+
+	log.Printf("connector enrolled as %s", spiffeID)
 
 	store := tlsutil.NewCertStore(workloadCert, nil, notAfter)
 	rootPool, err := tlsutil.RootPoolFromPEM(caPEM)

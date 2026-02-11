@@ -44,9 +44,8 @@ func Run() error {
 		return err
 	}
 
-	if err := PersistIdentity(cert, caPEM); err != nil {
-		return err
-	}
+	_ = cert
+	_ = caPEM
 	fmt.Printf("Enrolled connector with SPIFFE ID: %s\n", spiffeID)
 	return nil
 }
