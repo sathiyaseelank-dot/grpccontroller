@@ -7,7 +7,7 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 EnvironmentFile=/etc/grpcconnector/connector.conf
-LoadCredential=ENROLLMENT_TOKEN:/etc/grpcconnector/enrollment-token
+# Controller CA is provided via systemd credentials (test/dev only)
 LoadCredential=CONTROLLER_CA:/etc/grpcconnector/ca.crt
 
 # Restart behavior (same semantics as Twingate)
@@ -52,7 +52,7 @@ MemoryDenyWriteExecute=yes
 LockPersonality=yes
 
 # Runtime behavior
-UMask=0077
+UMask=0777
 RuntimeDirectory=grpcconnector
 WatchdogSec=30s
 
