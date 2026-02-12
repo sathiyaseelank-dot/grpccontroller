@@ -102,7 +102,6 @@ chmod 0600 "${token_file}"
 {
   echo "CONTROLLER_ADDR=${CONTROLLER_ADDR}"
   echo "CONNECTOR_ID=${CONNECTOR_ID}"
-  echo "CONTROLLER_CA_PATH=%d/CONTROLLER_CA"
   if [[ -n "${CONNECTOR_PRIVATE_IP:-}" ]]; then
     echo "CONNECTOR_PRIVATE_IP=${CONNECTOR_PRIVATE_IP}"
   fi

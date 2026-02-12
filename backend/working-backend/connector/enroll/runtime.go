@@ -72,6 +72,12 @@ func normalizeTrustDomain(v string) string {
 }
 
 func loadExplicitCA() ([]byte, error) {
+	if cred, err := ReadCredential("CONTROLLER_CA"); err != nil {
+		return nil, err
+	} else if cred != "" {
+		return []byte(cred), nil
+	}
+
 	caPath := strings.TrimSpace(os.Getenv("CONTROLLER_CA_PATH"))
 	if caPath == "" {
 		return nil, fmt.Errorf(
