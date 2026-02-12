@@ -64,6 +64,7 @@ install -m 0755 "${tmpdir}/grpcconnector" /usr/bin/grpcconnector
 config_dir="/etc/grpcconnector"
 config_file="${config_dir}/connector.conf"
 bundled_ca="${config_dir}/ca.crt"
+token_file="${config_dir}/enrollment-token"
 
 mkdir -p "${config_dir}"
 chmod 0700 "${config_dir}"
@@ -93,13 +94,15 @@ if [[ ! -f "${CONTROLLER_CA_PATH}" ]]; then
   exit 1
 fi
 install -m 0644 "${CONTROLLER_CA_PATH}" "${bundled_ca}"
-CONTROLLER_CA_PATH="${bundled_ca}"
+
+echo "Installing enrollment token..."
+printf "%s" "${ENROLLMENT_TOKEN}" > "${token_file}"
+chmod 0600 "${token_file}"
 
 {
   echo "CONTROLLER_ADDR=${CONTROLLER_ADDR}"
   echo "CONNECTOR_ID=${CONNECTOR_ID}"
-  echo "ENROLLMENT_TOKEN=${ENROLLMENT_TOKEN}"
-  echo "CONTROLLER_CA_PATH=${CONTROLLER_CA_PATH}"
+  echo "CONTROLLER_CA_PATH=%d/CONTROLLER_CA"
   if [[ -n "${CONNECTOR_PRIVATE_IP:-}" ]]; then
     echo "CONNECTOR_PRIVATE_IP=${CONNECTOR_PRIVATE_IP}"
   fi

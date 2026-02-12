@@ -68,6 +68,13 @@ func ConfigFromEnvEnroll() (Config, error) {
 		return Config{}, fmt.Errorf("CONNECTOR_ID is not set")
 	}
 	if token == "" {
+		cred, err := ReadCredential("ENROLLMENT_TOKEN")
+		if err != nil {
+			return Config{}, err
+		}
+		token = cred
+	}
+	if token == "" {
 		return Config{}, fmt.Errorf("ENROLLMENT_TOKEN is not set")
 	}
 

@@ -39,6 +39,13 @@ func Run() error {
 		return err
 	}
 	enrollCfg.Token = os.Getenv("ENROLLMENT_TOKEN")
+	if enrollCfg.Token == "" {
+		cred, err := enroll.ReadCredential("ENROLLMENT_TOKEN")
+		if err != nil {
+			return err
+		}
+		enrollCfg.Token = cred
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

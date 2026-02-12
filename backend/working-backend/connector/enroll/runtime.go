@@ -1,15 +1,12 @@
 package enroll
 
 import (
-	"crypto/tls"
-	"crypto/x509"
-	"encoding/pem"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"connector/internal/buildinfo"
 )
@@ -17,11 +14,6 @@ import (
 const (
 	privateIPEnv = "CONNECTOR_PRIVATE_IP"
 	versionEnv   = "CONNECTOR_VERSION"
-
-	identityDir     = "/etc/grpcconnector"
-	identityCertPem = "connector.crt"
-	identityKeyPem  = "connector.key"
-	identityCAPem   = "controller.ca"
 )
 
 func ResolveVersion() string {
@@ -95,79 +87,18 @@ func loadExplicitCA() ([]byte, error) {
 	return pemBytes, nil
 }
 
-func IdentityPaths() (certPath, keyPath, caPath string) {
-	certPath = filepath.Join(identityDir, identityCertPem)
-	keyPath = filepath.Join(identityDir, identityKeyPem)
-	caPath = filepath.Join(identityDir, identityCAPem)
-	return
-}
-
-func LoadIdentity() (tls.Certificate, []byte, time.Time, error) {
-	certPath, keyPath, caPath := IdentityPaths()
-
-	certPEM, err := os.ReadFile(certPath)
+func ReadCredential(name string) (string, error) {
+	dir := strings.TrimSpace(os.Getenv("CREDENTIALS_DIRECTORY"))
+	if dir == "" {
+		return "", nil
+	}
+	path := filepath.Join(dir, name)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return tls.Certificate{}, nil, time.Time{}, err
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", fmt.Errorf("failed to read credential %s: %w", name, err)
 	}
-	keyPEM, err := os.ReadFile(keyPath)
-	if err != nil {
-		return tls.Certificate{}, nil, time.Time{}, err
-	}
-	caPEM, err := os.ReadFile(caPath)
-	if err != nil {
-		return tls.Certificate{}, nil, time.Time{}, err
-	}
-
-	workloadCert, err := tls.X509KeyPair(certPEM, keyPEM)
-	if err != nil {
-		return tls.Certificate{}, nil, time.Time{}, err
-	}
-
-	block, _ := pem.Decode(certPEM)
-	if block == nil || block.Type != "CERTIFICATE" {
-		return tls.Certificate{}, nil, time.Time{}, fmt.Errorf("invalid stored certificate PEM")
-	}
-	leaf, err := x509.ParseCertificate(block.Bytes)
-	if err != nil {
-		return tls.Certificate{}, nil, time.Time{}, err
-	}
-
-	return workloadCert, caPEM, leaf.NotAfter, nil
-}
-
-func PersistIdentity(cert tls.Certificate, caPEM []byte) error {
-	if err := os.MkdirAll(identityDir, 0700); err != nil {
-		return fmt.Errorf("failed to create %s: %w", identityDir, err)
-	}
-	if err := os.Chmod(identityDir, 0700); err != nil {
-		return fmt.Errorf("failed to chmod %s: %w", identityDir, err)
-	}
-
-	certPath, keyPath, caPath := IdentityPaths()
-
-	if len(cert.Certificate) == 0 {
-		return fmt.Errorf("missing certificate data")
-	}
-	certPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "CERTIFICATE",
-		Bytes: cert.Certificate[0],
-	})
-
-	keyDER, err := x509.MarshalPKCS8PrivateKey(cert.PrivateKey)
-	if err != nil {
-		return fmt.Errorf("failed to marshal private key: %w", err)
-	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-
-	if err := os.WriteFile(certPath, certPEM, 0600); err != nil {
-		return fmt.Errorf("failed to write cert: %w", err)
-	}
-	if err := os.WriteFile(keyPath, keyPEM, 0600); err != nil {
-		return fmt.Errorf("failed to write key: %w", err)
-	}
-	if err := os.WriteFile(caPath, caPEM, 0600); err != nil {
-		return fmt.Errorf("failed to write CA: %w", err)
-	}
-
-	return nil
+	return strings.TrimSpace(string(data)), nil
 }
