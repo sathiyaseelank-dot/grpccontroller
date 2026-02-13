@@ -87,6 +87,7 @@ func main() {
 	creds := credentials.NewTLS(tlsConfig)
 
 	registry := state.NewRegistry()
+	tunnelerRegistry := state.NewTunnelerRegistry()
 	tokenStore := state.NewTokenStore(0, tokenStorePath)
 
 	// ---- gRPC server ----
@@ -99,6 +100,8 @@ func main() {
 		grpc.StreamInterceptor(api.StreamSPIFFEInterceptor(trustDomain, "connector", "tunneler")),
 	)
 
+	controlPlaneServer := api.NewControlPlaneServer(trustDomain, registry, tunnelerRegistry)
+
 	// ---- enrollment service ----
 	enrollServer := api.NewEnrollmentServer(
 		caInst,
@@ -106,17 +109,11 @@ func main() {
 		trustDomain, // SPIFFE trust domain (without scheme)
 		tokenStore,
 		registry,
+		controlPlaneServer,
 	)
 
-	controllerpb.RegisterEnrollmentServiceServer(
-		grpcServer,
-		enrollServer,
-	)
-
-	controllerpb.RegisterControlPlaneServer(
-		grpcServer,
-		api.NewControlPlaneServer(trustDomain, registry),
-	)
+	controllerpb.RegisterEnrollmentServiceServer(grpcServer, enrollServer)
+	controllerpb.RegisterControlPlaneServer(grpcServer, controlPlaneServer)
 
 	// ---- admin HTTP server ----
 	adminMux := http.NewServeMux()

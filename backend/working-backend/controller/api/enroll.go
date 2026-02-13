@@ -32,16 +32,22 @@ type EnrollmentServer struct {
 	TrustDomain string
 	Tokens      *state.TokenStore
 	Registry    *state.Registry
+	Notifier    TunnelerNotifier
+}
+
+type TunnelerNotifier interface {
+	NotifyTunnelerAllowed(tunnelerID, spiffeID string)
 }
 
 // NewEnrollmentServer creates a new EnrollmentServer.
-func NewEnrollmentServer(caInst *ca.CA, caPEM []byte, trustDomain string, tokens *state.TokenStore, registry *state.Registry) *EnrollmentServer {
+func NewEnrollmentServer(caInst *ca.CA, caPEM []byte, trustDomain string, tokens *state.TokenStore, registry *state.Registry, notifier TunnelerNotifier) *EnrollmentServer {
 	return &EnrollmentServer{
 		CA:          caInst,
 		CAPEM:       caPEM,
 		TrustDomain: trustDomain,
 		Tokens:      tokens,
 		Registry:    registry,
+		Notifier:    notifier,
 	}
 }
 
@@ -143,6 +149,9 @@ func (s *EnrollmentServer) EnrollTunneler(
 		return nil, status.Errorf(codes.Internal, "certificate issuance failed: %v", err)
 	}
 	logIssuedCert("enroll-tunneler", spiffeID, certPEM)
+	if s.Notifier != nil {
+		s.Notifier.NotifyTunnelerAllowed(req.GetId(), spiffeID)
+	}
 
 	return &controllerpb.EnrollResponse{
 		Certificate:   certPEM,

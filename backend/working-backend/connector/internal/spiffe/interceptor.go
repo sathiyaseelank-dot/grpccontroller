@@ -17,6 +17,10 @@ const (
 	roleContextKey     contextKey = "spiffe-role"
 )
 
+type Allowlist interface {
+	Allowed(spiffeID string) bool
+}
+
 // UnaryInterceptor enforces SPIFFE identity on unary RPCs.
 func UnaryInterceptor(trustDomain string, allowedRoles ...string) grpc.UnaryServerInterceptor {
 	roles := makeRoleSet(allowedRoles)
@@ -35,6 +39,28 @@ func UnaryInterceptor(trustDomain string, allowedRoles ...string) grpc.UnaryServ
 		ctx = context.WithValue(ctx, spiffeIDContextKey, spiffeID)
 		ctx = context.WithValue(ctx, roleContextKey, role)
 
+		return handler(ctx, req)
+	}
+}
+
+// UnaryInterceptorWithAllowlist enforces SPIFFE identity and allowlist checks.
+func UnaryInterceptorWithAllowlist(trustDomain string, allowlist Allowlist, allowedRoles ...string) grpc.UnaryServerInterceptor {
+	roles := makeRoleSet(allowedRoles)
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (interface{}, error) {
+		spiffeID, role, err := extractAndVerifySPIFFE(ctx, trustDomain, roles)
+		if err != nil {
+			return nil, err
+		}
+		if role == "tunneler" && allowlist != nil && !allowlist.Allowed(spiffeID) {
+			return nil, errors.New("tunneler not allowed")
+		}
+		ctx = context.WithValue(ctx, spiffeIDContextKey, spiffeID)
+		ctx = context.WithValue(ctx, roleContextKey, role)
 		return handler(ctx, req)
 	}
 }
@@ -63,6 +89,34 @@ func StreamInterceptor(trustDomain string, allowedRoles ...string) grpc.StreamSe
 			),
 		}
 
+		return handler(srv, wrapped)
+	}
+}
+
+// StreamInterceptorWithAllowlist enforces SPIFFE identity and allowlist checks.
+func StreamInterceptorWithAllowlist(trustDomain string, allowlist Allowlist, allowedRoles ...string) grpc.StreamServerInterceptor {
+	roles := makeRoleSet(allowedRoles)
+	return func(
+		srv interface{},
+		ss grpc.ServerStream,
+		info *grpc.StreamServerInfo,
+		handler grpc.StreamHandler,
+	) error {
+		spiffeID, role, err := extractAndVerifySPIFFE(ss.Context(), trustDomain, roles)
+		if err != nil {
+			return err
+		}
+		if role == "tunneler" && allowlist != nil && !allowlist.Allowed(spiffeID) {
+			return errors.New("tunneler not allowed")
+		}
+		wrapped := &wrappedStream{
+			ServerStream: ss,
+			ctx: context.WithValue(
+				context.WithValue(ss.Context(), spiffeIDContextKey, spiffeID),
+				roleContextKey,
+				role,
+			),
+		}
 		return handler(srv, wrapped)
 	}
 }

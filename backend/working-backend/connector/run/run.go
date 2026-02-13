@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -15,6 +16,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"connector/enroll"
@@ -76,13 +78,14 @@ func Run() error {
 	if err != nil {
 		return err
 	}
+	allowlist := newTunnelerAllowlist()
 
 	reloadCh := make(chan struct{}, 1)
-	go controlPlaneLoop(ctx, cfg.controllerAddr, cfg.trustDomain, cfg.connectorID, cfg.privateIP, store, rootPool, reloadCh)
+	go controlPlaneLoop(ctx, cfg.controllerAddr, cfg.trustDomain, cfg.connectorID, cfg.privateIP, store, rootPool, allowlist, reloadCh)
 	go renewalLoop(ctx, cfg.controllerAddr, cfg.connectorID, cfg.trustDomain, store, rootPool, caPEM, reloadCh)
 
 	if cfg.listenAddr != "" {
-		go serverLoop(ctx, cfg.listenAddr, cfg.trustDomain, store, rootPool)
+		go serverLoop(ctx, cfg.listenAddr, cfg.trustDomain, store, rootPool, allowlist)
 	}
 
 	<-ctx.Done()
@@ -180,6 +183,9 @@ func configFromEnv() (runtimeConfig, error) {
 	if err != nil {
 		return runtimeConfig{}, err
 	}
+	if listenAddr == "" {
+		listenAddr = net.JoinHostPort(privateIP, "9443")
+	}
 
 	return runtimeConfig{
 		controllerAddr: controllerAddr,
@@ -190,7 +196,7 @@ func configFromEnv() (runtimeConfig, error) {
 	}, nil
 }
 
-func runConnectorServer(addr, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool) error {
+func runConnectorServer(addr, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -205,8 +211,8 @@ func runConnectorServer(addr, trustDomain string, store *tlsutil.CertStore, root
 
 	grpcServer := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
-		grpc.UnaryInterceptor(spiffe.UnaryInterceptor(trustDomain, "tunneler")),
-		grpc.StreamInterceptor(spiffe.StreamInterceptor(trustDomain, "tunneler")),
+		grpc.UnaryInterceptor(spiffe.UnaryInterceptorWithAllowlist(trustDomain, allowlist, "tunneler")),
+		grpc.StreamInterceptor(spiffe.StreamInterceptorWithAllowlist(trustDomain, allowlist, "tunneler")),
 	)
 
 	controllerpb.RegisterControlPlaneServer(grpcServer, &controlPlaneServer{})
@@ -215,7 +221,7 @@ func runConnectorServer(addr, trustDomain string, store *tlsutil.CertStore, root
 	return grpcServer.Serve(lis)
 }
 
-func serverLoop(ctx context.Context, addr, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool) {
+func serverLoop(ctx context.Context, addr, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist) {
 	backoff := 2 * time.Second
 	for {
 		select {
@@ -224,7 +230,7 @@ func serverLoop(ctx context.Context, addr, trustDomain string, store *tlsutil.Ce
 		default:
 		}
 
-		if err := runConnectorServer(addr, trustDomain, store, roots); err != nil && !errors.Is(err, context.Canceled) {
+		if err := runConnectorServer(addr, trustDomain, store, roots, allowlist); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("connector server stopped: %v", err)
 		}
 
@@ -241,7 +247,7 @@ func serverLoop(ctx context.Context, addr, trustDomain string, store *tlsutil.Ce
 	}
 }
 
-func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain, connectorID, privateIP string, store *tlsutil.CertStore, roots *x509.CertPool, reloadCh <-chan struct{}) {
+func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain, connectorID, privateIP string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist, reloadCh <-chan struct{}) {
 	backoff := 2 * time.Second
 	for {
 		select {
@@ -253,7 +259,7 @@ func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain, connecto
 		sessionCtx, cancel := context.WithCancel(ctx)
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- connectControlPlane(sessionCtx, controllerAddr, trustDomain, connectorID, privateIP, store, roots)
+			errCh <- connectControlPlane(sessionCtx, controllerAddr, trustDomain, connectorID, privateIP, store, roots, allowlist)
 		}()
 
 		select {
@@ -284,7 +290,7 @@ func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain, connecto
 	}
 }
 
-func connectControlPlane(ctx context.Context, controllerAddr, trustDomain, connectorID, privateIP string, store *tlsutil.CertStore, roots *x509.CertPool) error {
+func connectControlPlane(ctx context.Context, controllerAddr, trustDomain, connectorID, privateIP string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist) error {
 	tlsConfig := &tls.Config{
 		MinVersion:           tls.VersionTLS13,
 		GetClientCertificate: store.GetClientCertificate,
@@ -319,14 +325,16 @@ func connectControlPlane(ctx context.Context, controllerAddr, trustDomain, conne
 		return err
 	}
 
+	recvCh := make(chan *controllerpb.ControlMessage, 1)
 	recvErr := make(chan error, 1)
 	go func() {
 		for {
-			_, err := stream.Recv()
+			msg, err := stream.Recv()
 			if err != nil {
 				recvErr <- err
 				return
 			}
+			recvCh <- msg
 		}
 	}()
 
@@ -339,6 +347,8 @@ func connectControlPlane(ctx context.Context, controllerAddr, trustDomain, conne
 			return ctx.Err()
 		case err := <-recvErr:
 			return err
+		case msg := <-recvCh:
+			handleControlMessage(msg, allowlist)
 		case <-ticker.C:
 			if err := stream.Send(&controllerpb.ControlMessage{
 				Type:        "heartbeat",
@@ -457,4 +467,64 @@ func parseLeafCert(certPEM []byte) (*x509.Certificate, error) {
 		return nil, errors.New("invalid certificate PEM")
 	}
 	return x509.ParseCertificate(block.Bytes)
+}
+
+type tunnelerAllowlist struct {
+	mu       sync.RWMutex
+	bySPIFFE map[string]struct{}
+}
+
+func newTunnelerAllowlist() *tunnelerAllowlist {
+	return &tunnelerAllowlist{bySPIFFE: make(map[string]struct{})}
+}
+
+func (a *tunnelerAllowlist) Allowed(spiffeID string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	_, ok := a.bySPIFFE[spiffeID]
+	return ok
+}
+
+func (a *tunnelerAllowlist) Replace(items []tunnelerInfo) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.bySPIFFE = make(map[string]struct{}, len(items))
+	for _, item := range items {
+		if item.SPIFFEID == "" {
+			continue
+		}
+		a.bySPIFFE[item.SPIFFEID] = struct{}{}
+	}
+}
+
+func (a *tunnelerAllowlist) Add(spiffeID string) {
+	if spiffeID == "" {
+		return
+	}
+	a.mu.Lock()
+	a.bySPIFFE[spiffeID] = struct{}{}
+	a.mu.Unlock()
+}
+
+type tunnelerInfo struct {
+	TunnelerID string `json:"tunneler_id"`
+	SPIFFEID   string `json:"spiffe_id"`
+}
+
+func handleControlMessage(msg *controllerpb.ControlMessage, allowlist *tunnelerAllowlist) {
+	if msg == nil || allowlist == nil {
+		return
+	}
+	switch msg.GetType() {
+	case "tunneler_allowlist":
+		var items []tunnelerInfo
+		if err := json.Unmarshal(msg.GetPayload(), &items); err == nil {
+			allowlist.Replace(items)
+		}
+	case "tunneler_allow":
+		var item tunnelerInfo
+		if err := json.Unmarshal(msg.GetPayload(), &item); err == nil {
+			allowlist.Add(item.SPIFFEID)
+		}
+	}
 }
