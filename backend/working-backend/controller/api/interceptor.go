@@ -2,8 +2,11 @@ package api
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
+	"log"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -147,6 +150,7 @@ func extractAndVerifySPIFFE(
 	}
 
 	cert := tlsInfo.State.PeerCertificates[0]
+	logPeerTLS(cert)
 
 	if len(cert.URIs) != 1 {
 		return "", "", errors.New("exactly one SPIFFE ID is required")
@@ -190,4 +194,21 @@ func makeRoleSet(roles []string) map[string]struct{} {
 		set[r] = struct{}{}
 	}
 	return set
+}
+
+func logPeerTLS(cert *x509.Certificate) {
+	if cert == nil {
+		return
+	}
+	var spiffeURI string
+	if len(cert.URIs) == 1 {
+		spiffeURI = cert.URIs[0].String()
+	}
+	log.Printf(
+		"mtls peer: subject=%q serial=%s not_after=%s spiffe=%q",
+		cert.Subject.String(),
+		cert.SerialNumber.String(),
+		cert.NotAfter.Format(time.RFC3339),
+		spiffeURI,
+	)
 }
