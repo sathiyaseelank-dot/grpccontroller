@@ -3,6 +3,7 @@ package tlsutil
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"net/url"
 	"strings"
@@ -55,34 +56,51 @@ func RootPoolFromPEM(pemBytes []byte) (*x509.CertPool, error) {
 	return pool, nil
 }
 
-// VerifyPeerSPIFFE verifies the peer chain and SPIFFE identity.
-func VerifyPeerSPIFFE(rawCerts [][]byte, roots *x509.CertPool, trustDomain, expectedRole string, usage x509.ExtKeyUsage) error {
+// ParseAndValidateCA ensures the PEM contains a valid CA certificate.
+func ParseAndValidateCA(pemBytes []byte) (*x509.Certificate, error) {
+	block, _ := pem.Decode(pemBytes)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, errors.New("invalid CA PEM")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	if !cert.IsCA || !cert.BasicConstraintsValid {
+		return nil, errors.New("certificate is not a valid CA")
+	}
+	if cert.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return nil, errors.New("CA certificate missing key usage")
+	}
+	return cert, nil
+}
+
+// EqualCAPEM compares two CA PEM blocks by their DER bytes.
+func EqualCAPEM(a, b []byte) bool {
+	ab, _ := pem.Decode(a)
+	bb, _ := pem.Decode(b)
+	if ab == nil || bb == nil {
+		return false
+	}
+	return string(ab.Bytes) == string(bb.Bytes)
+}
+
+// VerifyPeerSPIFFE validates SPIFFE identity using verified chains.
+func VerifyPeerSPIFFE(rawCerts [][]byte, verifiedChains [][]*x509.Certificate, trustDomain, expectedRole string) error {
 	if len(rawCerts) == 0 {
 		return errors.New("no peer certificates")
 	}
 
-	certs := make([]*x509.Certificate, 0, len(rawCerts))
-	for _, raw := range rawCerts {
-		c, err := x509.ParseCertificate(raw)
-		if err != nil {
-			return err
-		}
-		certs = append(certs, c)
+	if len(verifiedChains) == 0 || len(verifiedChains[0]) == 0 {
+		return errors.New("peer verification failed")
 	}
 
-	opts := x509.VerifyOptions{
-		Roots:     roots,
-		KeyUsages: []x509.ExtKeyUsage{usage},
-	}
-	if _, err := certs[0].Verify(opts); err != nil {
-		return err
-	}
-
-	if len(certs[0].URIs) != 1 {
+	leaf := verifiedChains[0][0]
+	if len(leaf.URIs) != 1 {
 		return errors.New("exactly one SPIFFE ID is required")
 	}
 
-	uri := certs[0].URIs[0]
+	uri := leaf.URIs[0]
 	if err := verifySPIFFEURI(uri, trustDomain, expectedRole); err != nil {
 		return err
 	}

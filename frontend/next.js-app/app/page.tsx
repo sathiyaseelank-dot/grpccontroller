@@ -5,9 +5,10 @@ import { LoginForm } from "@/components/login-form"
 import { AdminSidebar } from "@/components/admin-sidebar"
 import { DashboardOverview } from "@/components/dashboard-overview"
 import { CreateToken } from "@/components/create-token"
+import { CreateTunnelerToken } from "@/components/create-tunneler-token"
 import { ConnectorsTable } from "@/components/connectors-table"
 
-type Page = "dashboard" | "tokens" | "connectors"
+type Page = "dashboard" | "tokens" | "tunneler-tokens" | "connectors"
 
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(false)
@@ -31,6 +32,7 @@ export default function App() {
         <div className="mx-auto max-w-5xl px-4 py-6 md:px-8 md:py-8">
           {activePage === "dashboard" && <DashboardOverview />}
           {activePage === "tokens" && <CreateToken />}
+          {activePage === "tunneler-tokens" && <CreateTunnelerToken />}
           {activePage === "connectors" && <ConnectorsTable />}
         </div>
       </main>

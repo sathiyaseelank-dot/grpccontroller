@@ -39,7 +39,7 @@ func main() {
 	trustDomain = normalizeTrustDomain(trustDomain)
 	adminAddr := os.Getenv("ADMIN_HTTP_ADDR")
 	if adminAddr == "" {
-		adminAddr = ":8080"
+		adminAddr = ":8081"
 	}
 	adminAuthToken := os.Getenv("ADMIN_AUTH_TOKEN")
 	internalAuthToken := os.Getenv("INTERNAL_API_TOKEN")
@@ -94,6 +94,7 @@ func main() {
 		grpc.Creds(creds),
 		grpc.UnaryInterceptor(api.UnaryAuthInterceptor(trustDomain, map[string]struct{}{
 			controllerpb.EnrollmentService_EnrollConnector_FullMethodName: {},
+			controllerpb.EnrollmentService_EnrollTunneler_FullMethodName:  {},
 		}, "connector", "tunneler")),
 		grpc.StreamInterceptor(api.StreamSPIFFEInterceptor(trustDomain, "connector", "tunneler")),
 	)

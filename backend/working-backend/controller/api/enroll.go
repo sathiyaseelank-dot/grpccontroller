@@ -111,6 +111,9 @@ func (s *EnrollmentServer) EnrollTunneler(
 	if !validID(req.GetId()) {
 		return nil, status.Error(codes.InvalidArgument, "missing tunneler id")
 	}
+	if req.GetToken() == "" {
+		return nil, status.Error(codes.InvalidArgument, "missing enrollment token")
+	}
 
 	pubKey, err := parsePublicKey(req.GetPublicKey())
 	if err != nil {
@@ -118,7 +121,7 @@ func (s *EnrollmentServer) EnrollTunneler(
 	}
 	logPublicKey("enroll-tunneler", pubKey, req.GetPublicKey())
 
-	if err := s.authorize(ctx, "tunneler", req.GetId()); err != nil {
+	if err := s.authorizeConnectorToken(req.GetToken(), req.GetId()); err != nil {
 		return nil, err
 	}
 
