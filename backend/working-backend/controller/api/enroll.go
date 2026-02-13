@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"log"
+	"net"
 	"strings"
 	"time"
 
@@ -82,14 +83,18 @@ func (s *EnrollmentServer) EnrollConnector(
 		s.TrustDomain,
 		req.GetId(),
 	)
+	var ipAddrs []net.IP
+	if ip := net.ParseIP(req.GetPrivateIp()); ip != nil {
+		ipAddrs = []net.IP{ip}
+	}
 
 	certPEM, err := ca.IssueWorkloadCert(
 		s.CA,
 		spiffeID,
 		pubKey,
-		1*time.Hour,
+		5*time.Minute,
 		nil,
-		nil,
+		ipAddrs,
 	)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "certificate issuance failed: %v", err)
@@ -187,10 +192,18 @@ func (s *EnrollmentServer) Renew(
 
 	ttl := 30 * time.Minute
 	if role == "connector" {
-		ttl = 1 * time.Hour
+		ttl = 5 * time.Minute
+	}
+	var ipAddrs []net.IP
+	if role == "connector" && s.Registry != nil {
+		if rec, ok := s.Registry.Get(req.GetId()); ok {
+			if ip := net.ParseIP(rec.PrivateIP); ip != nil {
+				ipAddrs = []net.IP{ip}
+			}
+		}
 	}
 
-	certPEM, err := ca.IssueWorkloadCert(s.CA, spiffeID, pubKey, ttl, nil, nil)
+	certPEM, err := ca.IssueWorkloadCert(s.CA, spiffeID, pubKey, ttl, nil, ipAddrs)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "certificate renewal failed: %v", err)
 	}

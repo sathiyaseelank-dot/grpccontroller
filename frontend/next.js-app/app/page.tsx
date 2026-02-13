@@ -7,8 +7,9 @@ import { DashboardOverview } from "@/components/dashboard-overview"
 import { CreateToken } from "@/components/create-token"
 import { CreateTunnelerToken } from "@/components/create-tunneler-token"
 import { ConnectorsTable } from "@/components/connectors-table"
+import { TunnelersTable } from "@/components/tunnelers-table"
 
-type Page = "dashboard" | "tokens" | "tunneler-tokens" | "connectors"
+type Page = "dashboard" | "tokens" | "tunneler-tokens" | "connectors" | "tunnelers"
 
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(false)
@@ -34,6 +35,7 @@ export default function App() {
           {activePage === "tokens" && <CreateToken />}
           {activePage === "tunneler-tokens" && <CreateTunnelerToken />}
           {activePage === "connectors" && <ConnectorsTable />}
+          {activePage === "tunnelers" && <TunnelersTable />}
         </div>
       </main>
     </div>

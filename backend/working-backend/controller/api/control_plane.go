@@ -16,19 +16,21 @@ import (
 // ControlPlaneServer implements the controller.v1.ControlPlane service.
 type ControlPlaneServer struct {
 	controllerpb.UnimplementedControlPlaneServer
-	registry  *state.Registry
-	tunnelers *state.TunnelerRegistry
-	mu        sync.Mutex
-	clients   map[string]*connectorClient
+	registry       *state.Registry
+	tunnelers      *state.TunnelerRegistry
+	tunnelerStatus *state.TunnelerStatusRegistry
+	mu             sync.Mutex
+	clients        map[string]*connectorClient
 }
 
 // NewControlPlaneServer creates a new control plane server.
-func NewControlPlaneServer(trustDomain string, registry *state.Registry, tunnelers *state.TunnelerRegistry) *ControlPlaneServer {
+func NewControlPlaneServer(trustDomain string, registry *state.Registry, tunnelers *state.TunnelerRegistry, tunnelerStatus *state.TunnelerStatusRegistry) *ControlPlaneServer {
 	_ = trustDomain
 	return &ControlPlaneServer{
-		registry:  registry,
-		tunnelers: tunnelers,
-		clients:   make(map[string]*connectorClient),
+		registry:       registry,
+		tunnelers:      tunnelers,
+		tunnelerStatus: tunnelerStatus,
+		clients:        make(map[string]*connectorClient),
 	}
 }
 
@@ -65,6 +67,17 @@ func (s *ControlPlaneServer) Connect(stream controllerpb.ControlPlane_ConnectSer
 				s.registry.RecordHeartbeat(msg.GetConnectorId(), msg.GetPrivateIp())
 			}
 			log.Printf("heartbeat: connector_id=%s private_ip=%s status=%s", msg.GetConnectorId(), msg.GetPrivateIp(), msg.GetStatus())
+		}
+		if msg.GetType() == "tunneler_heartbeat" && s.tunnelerStatus != nil {
+			var payload struct {
+				TunnelerID  string `json:"tunneler_id"`
+				SPIFFEID    string `json:"spiffe_id"`
+				Status      string `json:"status"`
+				ConnectorID string `json:"connector_id"`
+			}
+			if err := json.Unmarshal(msg.GetPayload(), &payload); err == nil {
+				s.tunnelerStatus.Record(payload.TunnelerID, payload.SPIFFEID, payload.ConnectorID)
+			}
 		}
 	}
 }

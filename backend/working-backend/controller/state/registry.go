@@ -63,3 +63,13 @@ func (r *Registry) List() []ConnectorRecord {
 	})
 	return out
 }
+
+func (r *Registry) Get(id string) (ConnectorRecord, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	rec, ok := r.connectors[id]
+	if !ok {
+		return ConnectorRecord{}, false
+	}
+	return *rec, true
+}

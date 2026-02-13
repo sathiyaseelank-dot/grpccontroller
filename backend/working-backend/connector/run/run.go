@@ -70,6 +70,7 @@ func Run() error {
 	}
 	workloadCert := cert
 	notAfter := certInfo.NotAfter
+	totalTTL := certInfo.NotAfter.Sub(certInfo.NotBefore)
 
 	log.Printf("connector enrolled as %s", spiffeID)
 
@@ -79,13 +80,14 @@ func Run() error {
 		return err
 	}
 	allowlist := newTunnelerAllowlist()
+	controllerSendCh := make(chan *controllerpb.ControlMessage, 16)
 
 	reloadCh := make(chan struct{}, 1)
-	go controlPlaneLoop(ctx, cfg.controllerAddr, cfg.trustDomain, cfg.connectorID, cfg.privateIP, store, rootPool, allowlist, reloadCh)
-	go renewalLoop(ctx, cfg.controllerAddr, cfg.connectorID, cfg.trustDomain, store, rootPool, caPEM, reloadCh)
+	go controlPlaneLoop(ctx, cfg.controllerAddr, cfg.trustDomain, cfg.connectorID, cfg.privateIP, store, rootPool, allowlist, controllerSendCh, reloadCh)
+	go renewalLoop(ctx, cfg.controllerAddr, cfg.connectorID, cfg.trustDomain, store, rootPool, caPEM, totalTTL)
 
 	if cfg.listenAddr != "" {
-		go serverLoop(ctx, cfg.listenAddr, cfg.trustDomain, store, rootPool, allowlist)
+		go serverLoop(ctx, cfg.listenAddr, cfg.trustDomain, store, rootPool, allowlist, controllerSendCh, cfg.connectorID)
 	}
 
 	<-ctx.Done()
@@ -196,7 +198,7 @@ func configFromEnv() (runtimeConfig, error) {
 	}, nil
 }
 
-func runConnectorServer(addr, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist) error {
+func runConnectorServer(addr, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist, controllerSendCh chan<- *controllerpb.ControlMessage, connectorID string) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
@@ -215,13 +217,16 @@ func runConnectorServer(addr, trustDomain string, store *tlsutil.CertStore, root
 		grpc.StreamInterceptor(spiffe.StreamInterceptorWithAllowlist(trustDomain, allowlist, "tunneler")),
 	)
 
-	controllerpb.RegisterControlPlaneServer(grpcServer, &controlPlaneServer{})
+	controllerpb.RegisterControlPlaneServer(grpcServer, &controlPlaneServer{
+		connectorID: connectorID,
+		sendCh:      controllerSendCh,
+	})
 
 	log.Printf("connector server listening on %s", addr)
 	return grpcServer.Serve(lis)
 }
 
-func serverLoop(ctx context.Context, addr, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist) {
+func serverLoop(ctx context.Context, addr, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist, controllerSendCh chan<- *controllerpb.ControlMessage, connectorID string) {
 	backoff := 2 * time.Second
 	for {
 		select {
@@ -230,7 +235,7 @@ func serverLoop(ctx context.Context, addr, trustDomain string, store *tlsutil.Ce
 		default:
 		}
 
-		if err := runConnectorServer(addr, trustDomain, store, roots, allowlist); err != nil && !errors.Is(err, context.Canceled) {
+		if err := runConnectorServer(addr, trustDomain, store, roots, allowlist, controllerSendCh, connectorID); err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("connector server stopped: %v", err)
 		}
 
@@ -247,7 +252,7 @@ func serverLoop(ctx context.Context, addr, trustDomain string, store *tlsutil.Ce
 	}
 }
 
-func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain, connectorID, privateIP string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist, reloadCh <-chan struct{}) {
+func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain, connectorID, privateIP string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist, controllerSendCh <-chan *controllerpb.ControlMessage, reloadCh <-chan struct{}) {
 	backoff := 2 * time.Second
 	for {
 		select {
@@ -259,7 +264,7 @@ func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain, connecto
 		sessionCtx, cancel := context.WithCancel(ctx)
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- connectControlPlane(sessionCtx, controllerAddr, trustDomain, connectorID, privateIP, store, roots, allowlist)
+			errCh <- connectControlPlane(sessionCtx, controllerAddr, trustDomain, connectorID, privateIP, store, roots, allowlist, controllerSendCh)
 		}()
 
 		select {
@@ -290,7 +295,7 @@ func controlPlaneLoop(ctx context.Context, controllerAddr, trustDomain, connecto
 	}
 }
 
-func connectControlPlane(ctx context.Context, controllerAddr, trustDomain, connectorID, privateIP string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist) error {
+func connectControlPlane(ctx context.Context, controllerAddr, trustDomain, connectorID, privateIP string, store *tlsutil.CertStore, roots *x509.CertPool, allowlist *tunnelerAllowlist, controllerSendCh <-chan *controllerpb.ControlMessage) error {
 	tlsConfig := &tls.Config{
 		MinVersion:           tls.VersionTLS13,
 		GetClientCertificate: store.GetClientCertificate,
@@ -349,6 +354,12 @@ func connectControlPlane(ctx context.Context, controllerAddr, trustDomain, conne
 			return err
 		case msg := <-recvCh:
 			handleControlMessage(msg, allowlist)
+		case msg := <-controllerSendCh:
+			if msg != nil {
+				if err := stream.Send(msg); err != nil {
+					return err
+				}
+			}
 		case <-ticker.C:
 			if err := stream.Send(&controllerpb.ControlMessage{
 				Type:        "heartbeat",
@@ -362,9 +373,9 @@ func connectControlPlane(ctx context.Context, controllerAddr, trustDomain, conne
 	}
 }
 
-func renewalLoop(ctx context.Context, controllerAddr, connectorID, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, caPEM []byte, reloadCh chan<- struct{}) {
+func renewalLoop(ctx context.Context, controllerAddr, connectorID, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, caPEM []byte, totalTTL time.Duration) {
 	for {
-		next := nextRenewal(store.NotAfter())
+		next := nextRenewal(store.NotAfter(), totalTTL)
 		timer := time.NewTimer(time.Until(next))
 		select {
 		case <-ctx.Done():
@@ -373,29 +384,26 @@ func renewalLoop(ctx context.Context, controllerAddr, connectorID, trustDomain s
 		case <-timer.C:
 		}
 
-		cert, certPEM, notAfter, err := renewOnce(ctx, controllerAddr, connectorID, trustDomain, store, roots, caPEM)
+		cert, certPEM, notAfter, notBefore, err := renewOnce(ctx, controllerAddr, connectorID, trustDomain, store, roots, caPEM)
 		if err != nil {
 			log.Printf("certificate renewal failed: %v", err)
 			continue
 		}
 
 		store.Update(cert, certPEM, notAfter)
-		select {
-		case reloadCh <- struct{}{}:
-		default:
-		}
+		totalTTL = notAfter.Sub(notBefore)
 	}
 }
 
-func renewOnce(ctx context.Context, controllerAddr, connectorID, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, caPEM []byte) (tls.Certificate, []byte, time.Time, error) {
+func renewOnce(ctx context.Context, controllerAddr, connectorID, trustDomain string, store *tlsutil.CertStore, roots *x509.CertPool, caPEM []byte) (tls.Certificate, []byte, time.Time, time.Time, error) {
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return tls.Certificate{}, nil, time.Time{}, err
+		return tls.Certificate{}, nil, time.Time{}, time.Time{}, err
 	}
 
 	pubDER, err := x509.MarshalPKIXPublicKey(&privKey.PublicKey)
 	if err != nil {
-		return tls.Certificate{}, nil, time.Time{}, err
+		return tls.Certificate{}, nil, time.Time{}, time.Time{}, err
 	}
 
 	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubDER})
@@ -415,48 +423,48 @@ func renewOnce(ctx context.Context, controllerAddr, connectorID, trustDomain str
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
 	)
 	if err != nil {
-		return tls.Certificate{}, nil, time.Time{}, err
+		return tls.Certificate{}, nil, time.Time{}, time.Time{}, err
 	}
 	defer conn.Close()
 
 	client := controllerpb.NewEnrollmentServiceClient(conn)
 	resp, err := client.Renew(ctx, &controllerpb.EnrollRequest{Id: connectorID, PublicKey: pubPEM})
 	if err != nil {
-		return tls.Certificate{}, nil, time.Time{}, err
+		return tls.Certificate{}, nil, time.Time{}, time.Time{}, err
 	}
 	if len(resp.CaCertificate) == 0 {
-		return tls.Certificate{}, nil, time.Time{}, errors.New("empty CA certificate in renewal response")
+		return tls.Certificate{}, nil, time.Time{}, time.Time{}, errors.New("empty CA certificate in renewal response")
 	}
 	if !tlsutil.EqualCAPEM(caPEM, resp.CaCertificate) {
-		return tls.Certificate{}, nil, time.Time{}, errors.New("internal CA mismatch during renewal")
+		return tls.Certificate{}, nil, time.Time{}, time.Time{}, errors.New("internal CA mismatch during renewal")
 	}
 
 	block, _ := pem.Decode(resp.Certificate)
 	if block == nil || block.Type != "CERTIFICATE" {
-		return tls.Certificate{}, nil, time.Time{}, errors.New("invalid certificate PEM")
+		return tls.Certificate{}, nil, time.Time{}, time.Time{}, errors.New("invalid certificate PEM")
 	}
 
 	leaf, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
-		return tls.Certificate{}, nil, time.Time{}, err
+		return tls.Certificate{}, nil, time.Time{}, time.Time{}, err
 	}
 
 	workloadCert := tls.Certificate{Certificate: [][]byte{block.Bytes}, PrivateKey: privKey}
-	return workloadCert, resp.Certificate, leaf.NotAfter, nil
+	return workloadCert, resp.Certificate, leaf.NotAfter, leaf.NotBefore, nil
 }
 
-func nextRenewal(notAfter time.Time) time.Time {
-	ttl := time.Until(notAfter)
-	if ttl <= 0 {
+func nextRenewal(notAfter time.Time, totalTTL time.Duration) time.Time {
+	remaining := time.Until(notAfter)
+	if remaining <= 0 {
 		return time.Now().Add(10 * time.Second)
 	}
-	advance := ttl / 3
-	if advance < 5*time.Minute {
-		advance = 5 * time.Minute
+	if totalTTL <= 0 {
+		totalTTL = remaining
 	}
-	next := notAfter.Add(-advance)
-	if next.Before(time.Now().Add(30 * time.Second)) {
-		return time.Now().Add(30 * time.Second)
+	renewAt := totalTTL * 30 / 100
+	next := notAfter.Add(-renewAt)
+	if next.Before(time.Now().Add(10 * time.Second)) {
+		return time.Now().Add(10 * time.Second)
 	}
 	return next
 }

@@ -88,6 +88,7 @@ func main() {
 
 	registry := state.NewRegistry()
 	tunnelerRegistry := state.NewTunnelerRegistry()
+	tunnelerStatus := state.NewTunnelerStatusRegistry()
 	tokenStore := state.NewTokenStore(0, tokenStorePath)
 
 	// ---- gRPC server ----
@@ -100,7 +101,7 @@ func main() {
 		grpc.StreamInterceptor(api.StreamSPIFFEInterceptor(trustDomain, "connector", "tunneler")),
 	)
 
-	controlPlaneServer := api.NewControlPlaneServer(trustDomain, registry, tunnelerRegistry)
+	controlPlaneServer := api.NewControlPlaneServer(trustDomain, registry, tunnelerRegistry, tunnelerStatus)
 
 	// ---- enrollment service ----
 	enrollServer := api.NewEnrollmentServer(
@@ -120,6 +121,7 @@ func main() {
 	adminServer := &admin.Server{
 		Tokens:            tokenStore,
 		Reg:               registry,
+		Tunnelers:         tunnelerStatus,
 		AdminAuthToken:    adminAuthToken,
 		InternalAuthToken: internalAuthToken,
 	}

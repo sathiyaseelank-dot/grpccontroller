@@ -7,13 +7,14 @@ import { ShieldCheck, LayoutDashboard, KeyRound, Network, LogOut, Menu, X } from
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 
-type Page = "dashboard" | "tokens" | "tunneler-tokens" | "connectors"
+type Page = "dashboard" | "tokens" | "tunneler-tokens" | "connectors" | "tunnelers"
 
 const navItems: { id: Page; label: string; icon: React.ElementType }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "tokens", label: "Create Connector Token", icon: KeyRound },
   { id: "tunneler-tokens", label: "Create Tunneler Token", icon: KeyRound },
   { id: "connectors", label: "Connectors", icon: Network },
+  { id: "tunnelers", label: "Tunnelers", icon: Network },
 ]
 
 export function AdminSidebar({

@@ -10,8 +10,9 @@ import (
 )
 
 type Server struct {
-	Tokens *state.TokenStore
-	Reg    *state.Registry
+	Tokens    *state.TokenStore
+	Reg       *state.Registry
+	Tunnelers *state.TunnelerStatusRegistry
 
 	AdminAuthToken    string
 	InternalAuthToken string
@@ -20,6 +21,7 @@ type Server struct {
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("/api/admin/tokens", s.adminAuth(http.HandlerFunc(s.handleCreateToken)))
 	mux.Handle("/api/admin/connectors", s.adminAuth(http.HandlerFunc(s.handleListConnectors)))
+	mux.Handle("/api/admin/tunnelers", s.adminAuth(http.HandlerFunc(s.handleListTunnelers)))
 	mux.Handle("/api/internal/consume-token", s.internalAuth(http.HandlerFunc(s.handleConsumeToken)))
 }
 
@@ -120,6 +122,39 @@ func (s *Server) handleListConnectors(w http.ResponseWriter, r *http.Request) {
 			PrivateIP: rec.PrivateIP,
 			LastSeen:  humanizeDuration(now.Sub(rec.LastSeen)),
 			Version:   rec.Version,
+		})
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) handleListTunnelers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.Tunnelers == nil {
+		writeJSON(w, http.StatusOK, []interface{}{})
+		return
+	}
+	records := s.Tunnelers.List()
+	now := time.Now().UTC()
+	type respTunneler struct {
+		ID          string `json:"id"`
+		Status      string `json:"status"`
+		ConnectorID string `json:"connector_id"`
+		LastSeen    string `json:"last_seen"`
+	}
+	resp := make([]respTunneler, 0, len(records))
+	for _, rec := range records {
+		status := "OFFLINE"
+		if now.Sub(rec.LastSeen) < 30*time.Second {
+			status = "ONLINE"
+		}
+		resp = append(resp, respTunneler{
+			ID:          rec.ID,
+			Status:      status,
+			ConnectorID: rec.ConnectorID,
+			LastSeen:    humanizeDuration(now.Sub(rec.LastSeen)),
 		})
 	}
 	writeJSON(w, http.StatusOK, resp)
