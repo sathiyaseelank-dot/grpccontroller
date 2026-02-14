@@ -1,0 +1,8 @@
+{
+  "/_global-error/page": "app/_global-error/page.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/admin/connectors/route": "app/api/admin/connectors/route.js",
+  "/api/admin/tokens/route": "app/api/admin/tokens/route.js",
+  "/api/admin/tunnelers/route": "app/api/admin/tunnelers/route.js",
+  "/page": "app/page.js"
+}

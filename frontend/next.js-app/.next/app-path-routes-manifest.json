@@ -1,0 +1,8 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/admin/connectors/route": "/api/admin/connectors",
+  "/api/admin/tokens/route": "/api/admin/tokens",
+  "/api/admin/tunnelers/route": "/api/admin/tunnelers",
+  "/page": "/"
+}

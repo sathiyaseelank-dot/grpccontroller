@@ -1,1 +1,5 @@
-{}
+{
+  "/api/admin/connectors/route": "app/api/admin/connectors/route.js",
+  "/api/admin/tunnelers/route": "app/api/admin/tunnelers/route.js",
+  "/page": "app/page.js"
+}
